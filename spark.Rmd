@@ -1,0 +1,561 @@
+An Introduction to Using Distributed File Systems and MapReduce through Spark
+==================================================================
+Chris Paciorek, Statistical Computing Facility, Department of Statistics, UC Berkeley
+
+Presented: November 7 and 14, 2014
+
+Last Revised: October, 2014
+
+```{r setup, include=FALSE}
+opts_chunk$set(engine='bash') # because we're using a lot of bash, let's set as default
+```
+
+# 0) This Tutorial
+
+for day 1: hdfs, startup, read data in, basic processing, basic regr and set them up for glm
+for day 2: iterative algos, compute pi algo, batch computation, algo discussion
+
+Materials for this tutorial, including the R markdown file that was used to create this document are available on github at `https://github.com/berkeley-scf/spark-workshop-2014`.  You can download the files by doing a git clone:
+```{clone, eval=FALSE}
+git clone https://github.com/berkeley-scf/spark-workshop-2014
+```
+
+To create this HTML document, simply compile the corresponding R Markdown file in R:
+```{rmd-compile, eval=FALSE}
+library(knitr)
+knit2html('spark.Rmd')
+```
+
+To get the airline dataset we'll be using as a running example, you can download from [this url](http://www.stat.berkeley.edu/share/paciorek/1987-2008.csvs.tgz) or as individual .bz2 files from ```http://www.stat.berkeley.edu/share/paciorek/{1987,...,2008}.csv.bz2```.  To unzip the single file: ```tar -xvzf 1987-2008.csvs.tgz```.
+
+
+
+I'm using the R extension of Markdown for ease of inserting code chunks into a Markdown document, though it is admittedly a bit strange to use R Markdown for a tutorial that doesn't involve R.
+
+# Introduction
+
+## Hadoop, MapReduce, and Spark
+
+The goal of this tutorial is to introduce Hadoop-style distributed computing for statistical use. We'll focus on using MapReduce algorithms for data preprocessing and statistical model fitting. We'll make use of the Hadoop dstributed file system (HDFS) for storing data and of Amazon's EC2 for creating virtual Linux clusters on which to do our computation.
+
+To do all this we'll be making use of Spark, a project out of the AmpLab here at Berkeley that aims to greatly increase the speed of Hadoop MapReduce by keeping data in memory when possible. 
+
+Spark allows one to write code in Java, Scala, and Python. We'll use Python as it is more widely known in the Statistics and Economics communities and should be easier to get started with for those who don't know any of those languages. 
+
+I won't assume knowledge of Python but will assume basic familiarity with operating in UNIX shell and with a scripting languages similar to Python such as R or Matlab. We'll also make use of some basic concepts of object-oriented programming.
+
+
+## Some Cautionary Notes
+
+1. Since PySpark involves serializing Python objects to pass them to Java, it may be slower than using Java or Scala for your MapReduce code.  Here's a [thread with some info](http://apache-spark-user-list.1001560.n3.nabble.com/Scala-vs-Python-performance-differences-td4247.html).
+
+2. If you can run your job using the memory and disk space on a single machine, you may be better off doing so, given the overhead involved in working in a distributed fashion.  That said, Spark allows you to scale in a way that would otherwise be difficult.
+
+3. Note that I've found the error messages in Spark (and also Hadoop) to be often very hard to understand. Some of this is because the messages are from the underlying Java implementation. So the process of figuring out syntax can be a bit painful at times.
+
+## Getting Spark running on an EC2-based cluster
+
+We'll focus on using the Amazon EC2 tools provided in the Spark software to start up an EC2 cluster with Spark and a distributed file system (the HDFS) already set up.
+
+We'll use the `spark-ec2` script available on the SCF Linux machines. You can also download and unzip the source code from the [Spark downloads page](http://spark.apache.org/downloads.html). Simply unzip the .tgz file and navigate to the ec2 directory and you'll find that script there. For this tutorial we'll be using Spark 1.1.0.
+
+### Starting your cluster
+
+First let's launch an EC2 cluster. We can choose the number of slave nodes. You'll need to have the authentication information for your Amazon AWS account as well as have generated a private key for use with your Amazon account. 
+Note that you'll need to have generated a private key for use with your Amazon account
+
+```{r, eval=FALSE}
+CLUSTER_SIZE=12
+SPARK_VERSION=1.1.0
+WAIT_TIME=200
+REGION=us-west-2
+PRIVATE_KEY=ec2star
+AWS_ACCESS_KEY_ID=FILL_IN_YOUR_ACCESS_KEY
+AWS_SECRET_ACCESS_KEY=FILL_IN_YOUR_SECRET_KEY
+cd /usr/local/linux/spark/ec2
+./spark-ec2 -k ec2star -i ~/.ssh/${PRIVATE_KEY}.rsa --region=${REGION} -s ${CLUSTER_SIZE} -w $WAIT_TIME -v ${SPARK_VERSION} launch sparkvm
+```
+
+You'll need to wait for a few minutes (in particular at least the number of seconds indicated above in the WAIT_TIME variable. Look carefully for error messages as sometimes the startup of the nodes and installation of the Spark software does not go smoothly. If all goes well, the end of the messages printed to the screen should look like this  XXXX
+
+```
+Setting up security groups...
+Searching for existing cluster sparkvm...
+Spark AMI: ami-9a6e0daa
+Launching instances...
+Launched 3 slaves in us-west-2a, regid = r-af7e0ca4
+Launched master in us-west-2a, regid = r-ac7e0ca7
+Waiting for instances to start up...
+Waiting 300 more seconds...
+
+[ a bunch of information about software installation ]
+
+Shutting down GANGLIA gmond:                               [FAILED]
+Starting GANGLIA gmond:                                    [  OK  ]
+Shutting down GANGLIA gmond:                               [FAILED]
+Starting GANGLIA gmond:                                    [  OK  ]
+Connection to ec2-54-212-54-11.us-west-2.compute.amazonaws.com closed.
+Shutting down GANGLIA gmond:                               [FAILED]
+Starting GANGLIA gmond:                                    [  OK  ]
+Connection to ec2-54-218-203-231.us-west-2.compute.amazonaws.com closed.
+Shutting down GANGLIA gmond:                               [FAILED]
+Starting GANGLIA gmond:                                    [  OK  ]
+Connection to ec2-50-112-80-198.us-west-2.compute.amazonaws.com closed.
+Shutting down GANGLIA gmetad:                              [FAILED]
+Starting GANGLIA gmetad:                                   [  OK  ]
+Stopping httpd:                                            [FAILED]
+Starting httpd:                                            [  OK  ]
+Connection to ec2-54-190-212-116.us-west-2.compute.amazonaws.com closed.
+Spark standalone cluster started at http://ec2-54-190-212-116.us-west-2.compute.amazonaws.com:8080
+Ganglia started at http://ec2-54-190-212-116.us-west-2.compute.amazonaws.com:5080/ganglia
+Done!
+```
+
+In some cases you may need to increase the wait time (the number after the -w) to ensure that the EC2 nodes start up correctly before the Spark script tries to set up the software on the nodes. Also note that I've had other glitches in starting up a Spark cluster. You should not get messages about files not found nor should the startup interrupt you to ask you to answer any questions. If either of these happen, something may have gone wrong. Feel free to email consult@stat if you run into problems.
+
+Note that when you want to shut down your cluster (and remember it will cost you money as long as it is running), do the following and make sure to answer 'y' when prompted.
+```{r, eval=FALSE}
+./spark-ec2 --region=${REGION} destroy sparkvm
+```
+
+### Navigating around your cluster
+
+First we'll login to the master node of our cluster.
+```{r, eval=FALSE}
+./spark-ec2 -k ${PRIVATE_KEY} -i ~/.ssh/${PRIVATE_KEY}.rsa --region=${REGION} login sparkvm
+```
+
+You could also login directly with ssh provided you notice the IP address of your master:
+```{r, eval=FALSE}
+ssh -i ~/.ssh/${PRIVATE_KEY}.rsa root@ec2-54-71-181-49.us-west-2.compute.amazonaws.com
+```
+
+Note that Spark expects you to be the root user so we'll do everything as root. Since this is a virtual cluster that we can shut down whenever we want, this isn't as dangerous as it would be with a regular computer.
+
+Once on the master, the addresses of the slave nodes are given in `/root/ephemeral-hdfs/conf/slaves`. You can choose one of them and ssh to it using the address. Then tools such as `top` will allow you to see what is going on on the machine. If you want to see what is stored in the HDFS on a given slave you can look in .
+
+Spark provides graphical interfaces that allow you to view the status of the system. Open a browser on your local machine. You'll need the IP address stored in `/root/ephemeral-hdfs/conf/masters` on the master node.  Here are the web interfaces you might take a look at:
+
+1. http://${MASTER_URL}:8080 -- general information about the Spark cluster
+2. http://${MASTER_URL}:4040 -- information about the Spark tasks being executed
+3. http://${MASTER_URL}:50070 -- information about the HDFS
+
+### Getting data onto your cluster and onto the HDFS
+
+Here are some options. 
+
+You can use `scp` to copy files to the master node. The easiest thing is to be logged onto the master node and scp from your local machine to the master. But you can also use the IP address from `/root/ephemeral-hdfs/conf/masters` to scp from your local machine to the master, making sure to use the `-i ~/.ssh/${PRIVATE_KEY}.rsa` flag to point to your private key. 
+
+We'll copy the ASA Data Expo Airline dataset:
+
+```{r, eval=FALSE}
+mkdir /mnt/airline
+scp paciorek@arwen.berkeley.edu:/scratch/users/paciorek/243/AirlineData/*bz2 /mnt/airline
+```
+
+Note that transfer to your cluster is free, but transfer from your cluster can be expensive. Campus is setting up a portal to AWS to greatly reduce that cost. Email consult@stat.berkeley.edu or consult@econ.berkeley.edu for more information. 
+
+Once you have files on the master you can set up directories in the HDFS as desired and copy the dataset onto the HDFS as follows. Often your dataset will be a collection of (possibly zipped) plain text files, such as CSVs. You don't need to unzip the files - Spark can read data from zipped files.
+
+
+```{r, eval=FALSE}
+export PATH=$PATH:/root/ephemeral-hdfs/bin/
+hadoop fs -mkdir /user
+hadoop fs -mkdir /user/data
+hadoop fs -mkdir /user/data/airline
+hadoop fs -copyFromLocal /mnt/airline/*bz2 /user/data/airline
+hadoop fs -ls /user/data/airline
+```
+
+Note that the commands to interact with the HDFS are similar to UNIX commands (`mkdir`, `ls`, but they must follow the `hadoop fs -` syntax.
+
+If the files are stored on Amazon's S3, you can copy directly onto the HDFS. Here's how, using the Google ngrams dataset as an example. Note that we need Hadoop's MapReduce processes running to do this distributed copy operation and Spark does not start these by default. (For doing MapReduce within Spark, we do NOT need to do this.)
+
+```{r}
+# start MapReduce processes
+/root/ephemeral-hdfs/bin/start-mapred.sh
+hadoop fs -mkdir /user/data/ngrams
+hadoop distcp -D fs.s3n.awsAccessKeyId='AKIA-----------' -D fs.s3n.awsSecretAccessKey='LzDOCH----------------------' s3n://datasets.elasticmapreduce/ngrams/books/20090715/eng-us-all/1gram hdfs:///user/data/ngrams
+```
+
+You'll need to use your AWS account information in place of the 'AKIA---' and 'LzDOCH---' strings here. Also check to see whether you need "s3" or "s3n" for the dataset you are interested in. Also, you may want to see if the dataset is stored in a particular AWS region as this may incur additional charges to transfer across regions. If so you may want to start up your cluster in the region in which the data reside. 
+
+Note that in general you want your dataset to be split into multiple chunks but not so many that each chunk is tiny (HDFS has trouble when there are millions of files), nor so few that the dataset can't be distributed across the nodes of the distributed file system. However, in terms of the latter, one can "repartition" the data in Spark. 
+
+[more details on file size]
+
+If you've done some operations and created a dataset (called airline-sfo here) on the HDFS that you want to transfer back to the master node, you can do the following. Note that this may give you back a dataset broken into pieces (one per Spark partition) so you may need to use UNIX tools to combine into one file.
+
+```{r}
+hadoop fs -copyToLocal /user/data/airline-sfo /mnt/airline-sfo
+```
+
+Spark can also read directly from Amazon's S3. We'll see syntax for that below.
+
+# Using Spark
+
+Ok, now we're in a position to do computations with Spark. We'll use the Python interface, PySpark 
+
+We can run PySpark in the form of a Python command line interpreter session or in batch mode to run the steps in a file of PySpark/Python code.
+
+To start PySpark in an interactive session, we do this
+```{r, eval=FALSE}
+export PATH=${PATH}:/root/spark/bin
+pyspark
+```
+
+## Background
+
+Spark is AmpLab's effort to create a version of Hadoop that uses memory as much as possible to reduce the speed of computation, particularly for iterative computations. So in addition to the distributed file system, you can think of Spark as providing you with access to distributed memory - the collective memory of all of the nodes in your cluster. However, that memory is still physically separated so you're not operating as if you had a single machine. But the abstractions provided by Spark allow you to do a lot of computations that would be a pain to program yourself even with access to a cluster and use of something like MPI for passing messages between machines. 
+
+## Reading data into Spark and doing basic manipulations
+
+### Reading from HDFS
+
+First we'll see how to read data into Spark from the HDFS and do some basic manipulations of the data.
+
+```{r, eval=FALSE}
+lines = sc.textFile('/user/ec2-user/airline')
+lines.count()
+```
+
+The textFile method reads the data from the airline directory, dealing with the compression and with the various files that data is split into. 
+
+Note that the first line seems to take no time at all. That is because Spark uses lazy evaluation, delaying evaluation of code until it needs to actually produce a result. So sometimes it can be hard to figure out how long each piece of a calculation takes because multiple pieces are being combined together.
+
+### Subsetting in Spark
+
+The next thing we could do is subset the dataset using the filter() method. Here's an example:
+
+```{r, eval=FALSE}
+sfo_lines = lines.filter(lambda line: "SFO" in line.split(',')[16]).cache()
+sfo_lines.count()
+```
+
+Notice my anonymous (lambda) function used as the filter where the anonymous function should produce a single boolean.
+
+Or I could save the subset as a new HDFS dataset that I could transfer back to the standard filesystem on the master using hdfs's copyToLocal command.
+
+```{r, eval=FALSE}
+lines.saveAsTextFile('/user/data/airline-sfo')
+```
+
+### Stratifying in Spark
+
+Now suppose I want to use Spark to do some stratification. Here's a very basic stratification. I'm going to group by departure airport and then count the number of departing flights. I'll use a mapper (`createKeyValue`) to create key-value pairs where the key is the departure airport and the value is just a 1 and then I do a reduction, stratifying by key, where I simply count the records associated with each key by using `add` as the reduce function. In Python, the key-value pairs are just a 2-element tuple (I think a 2-element list would be fine), but the value could be arbitrarily more complicated than the 1 that I use here. 
+
+```{r, eval=FALSE}
+def createKeyValue(line):
+    vals = line.split(',')
+    return(vals[16], 1)
+
+result = lines.map(createKeyValue).reduceByKey(add).collect()
+```
+
+Or more simply, if we are just counting
+
+```
+result = lines.map(createKeyValue).countByKey()
+```
+
+
+### Getting a few elements for inspection and debugging
+
+One useful thing is to be able to grab a single element or a few elements from an RDD. This allows us to look at the structure of units in the RDD and test our code by applying our Python functions directly to the units.
+
+```
+oneLine = lines.take(1)
+twoKeyCounts = lines.map(createKeyValue).reduceByKey(add).take(2)
+```
+
+### Aggregation calculations
+
+Now let's do some aggregation calculations. One might do this sort of thing in the process of reducing down a large dataset to some summary values on which to do the core analysis.
+
+First we'll do some calculations involving sums/means that naturally fit within a MapReduce paradigm and then we'll do a median calculation, which is not associative and communative so is a bit harder. 
+
+HERE HERE HERE
+do sum calc
+do 
+
+### And now some aggregation that is not naturally MapReduce
+
+### Writing out stratified data
+
+Now suppose we wanted to create multiple datasets, one per stratum. This does not fit all that well into the MapReduce/HDFS paradigm. We could loop through the unique values of the stratifying variable using filter() and saveAsTextFile() as seen above. There are not really any better ways to do this, but if we first sort by key, that can improve our speed. Here I'll stratify by departure airport.
+
+```
+def computeMapper(line):
+    vals = line.split(',')
+    keyVal = vals[16]
+    return(keyVal, line)
+
+output = lines.map(computeMapper).sortByKey().cache()
+keyInfo = output.countByKey()
+keys = keyInfo.keys() # could I do output.keys()?
+
+for curkey in keys:
+    const = sc.broadcast(curkey)
+    output.filter(lambda input: curkey == input[0]).map(lambda x: x[1]).repartition(1).saveAsTextFile('/user/data/' + curkey)
+```
+
+The repartition(1) ensures that the entire RDD for a given key is on a single partition so that we get a single file for each stratum instead of having each stratum split into pieces across the different nodes hosting the HDFS. The mapper simply pulls out the value for each key-value pair. 
+
+### Reading into Spark from S3
+
+If we wanted to read directly into Spark from S3 (again checking if we need s3 or s3n), we can do something like this, here reading from the berkeley-scf-test S3 bucket. 
+
+```{r, eval=FALSE}
+lines = sc.textFile("s3n://AKIA----:LzDOCH-----@berkeley-scf-test/test/2009_nfl_pbp_data.csv") 
+```
+
+That was for a single CSV, but if you had a directory of them, I think you could give the directory name and/or use wildcards. Note the ":" to separate the two parts of your AWS credential information. 
+
+
+## Doing a distributed computation via a simple MapReduce calculation
+
+Now let's see a basic MapReduce calculation where we write our own Python code for the map and reduce functions.
+
+### MapReduce in the Abstract
+
+First, what is MapReduce. It's a sort of meta-algorithm. If you can write your algorithm/computation as a MapReduce algorithm, then you should be able to implement it in Spark or in standard Hadoop, including Amazon's Elastic MapReduce framework. Here we'll use Spark.
+
+The basic idea is that your computation be written as a one or more iterations over a Map step and a Reduce step. The map step takes each 'observation' (each unit that can be treated independently) and applies some transformation to it. Think of a mathematical mapping. The reduction step then collects the results and does some sort of aggregation operation that returns a summary measure. Some times the mapping step involves computing a key value for each unit. The units that share the same key are then collected together and a reduction step may be done for each key value. We'll see a variety of MapReduce algorithms here so this should become more concrete.
+
+In addition we can pass shared data to all the nodes via a broadcast step. This will often be important in iterative calculations. E.g., we might broadcast the current parameter values in an iterative optimization computation. 
+
+### Basic MapReduce example
+
+We'll do a simulation to estimate the value of pi as an embarrassingly parallel calculation using MapReduce.
+
+Here's the Python code
+
+```{r, eval=FALSE, engine='python'}
+import numpy.random as rand
+from operator import add
+
+samples_per_slice = 1000000
+num_slices = 100
+
+def sample(p):
+    rand.seed(p)
+    x, y = rand.random(samples_per_slice), rand.random(samples_per_slice)
+    return sum(x*x + y*y < 1)
+
+count = sc.parallelize(xrange(0, num_slices), num_slices).map(sample).reduce(lambda a, b: a + b)
+print "Pi is roughly %f" % (4.0 * count / (num_slices*samples_per_slice))
+```
+
+Let's piece that apart. The mapping step here is to take a number, `p` and compute a bunch of random numbers, returning the number where the length of the random vector is less than one.  So `sample` is the map function
+
+The reduction step is to combine all those sums into a single sum (`count`) that can then be used to estimate pi. Notice that the reduction function is just addition. The reduction operator needs to be associative and communative - it can't matter what order the values are passed to the reducer or which values are grouped together for reduction. 
+
+A few comments here. First we could have sampled a single random vector, thereby calling parallelize across numslices*samples_per_slice. But it's much more computationally efficient to do a larger chunk of calculation in eahc process since there is overhead in running each process. But we want enough processes to make use of all the processors collectively in our Spark cluster and probably rather more than that in case some processors do the computation more slowly than others. Also, if the computation involved a large amount of memory we wouldn't want to exceed the physical RAM available to the processes that work simultaneously on a node. 
+
+The parallelize call basically takes the numbers 0,1,2,...,num_slices and treats them as the input "dataset". These are the initial units and then the transformation (the mapper) is to do the RNG and compute that sum. 
+
+Note that as the computation runs, we see each process of running sample() is assigned to a node and starts and finishes.
+
+```{r, eval=FALSE}
+14/10/09 00:30:42 INFO scheduler.TaskSetManager: Starting task 6.0 in stage 0.0 (TID 6, ip-10-252-175-7.us-west-2.compute.internal, PROCESS_LOCAL, 1113 bytes)
+14/10/09 00:30:42 INFO scheduler.TaskSetManager: Finished task 1.0 in stage 0.0 (TID 1) in 2547 ms on ip-10-252-175-7.us-west-2.compute.internal (1/100)
+14/10/09 00:30:42 INFO scheduler.TaskSetManager: Starting task 7.0 in stage 0.0 (TID 7, ip-10-252-175-7.us-west-2.compute.internal, PROCESS_LOCAL, 1113 bytes)
+14/10/09 00:30:42 INFO scheduler.TaskSetManager: Finished task 0.0 in stage 0.0 (TID 0) in 2600 ms on ip-10-252-175-7.us-west-2.compute.internal (2/100)
+14/10/09 00:30:42 INFO scheduler.TaskSetManager: Starting task 8.0 in stage 0.0 (TID 8, ip-10-252-152-121.us-west-2.compute.internal, PROCESS_LOCAL, 1113 bytes)
+```
+
+
+As before, we start with the SparkContext object and successively apply methods to objects, since this is in an OOP paradigm. Once we've done the sc.parallelize(xrange(0, num_slices), num_slices) step, we have a Spark RDD. We could have done the computation in steps. E.g.,
+
+```{r, eval=FALSE, engine='python'}
+vals = sc.parallelize(xrange(0, num_slices), num_slices).cache()
+sumVals = vals.map(sample).cache()
+count = sumVals.reduce(lambda a, b: a + b)
+```
+
+I've added the .cache() method here so that values are kept in memory for faster processing in subsequent steps.
+
+You can see which RDDs are cached using the web ui at http://<master_host_name>:4040
+
+We can also do that calculation as a batch job.
+
+Here's the code in the file piCalc.py
+```{r, eval=FALSE, engine='python'}
+# insert piCalc.py
+```
+
+And here's how we run it from the UNIX command line on the master node
+```{r, eval=FALSE}
+# pyspark piCalc.py `cat /root/spark-ec2/cluster-url` 100000000 1000
+spark-submit piCalc.py 100000000 1000
+```
+
+# Model fitting
+
+### Regression example with sufficient statistics
+
+### Coordinate descent
+
+### Lasso via coordinate descent
+
+### Gradient descent
+
+mention SGD
+
+# other
+
+possible examples:
+aggregate and spit back as files to hdfs
+avg delay by airline by month by time of dat by city-dist pair
+mimic spark's glm
+do lasso?
+
+12-slave on full airline works pretty well
+
+# Getting Spark running
+
+We'll focus on using the Amazon EC2 tools provided in the Spark software to start up an EC2 cluster with Spark and a distributed file system (the HDFS) already set up.
+
+## testing spark on a single machine
+sbt run
+
+# What is MapReduce?
+
+# What is Spark and what is RDD?
+
+caching
+in-memory calculations
+
+see Shivaram's email about how to know what RDD are in memory
+
+partitions matter - good to have at least as many as the number of total cores so that you are using all your cores
+
+# basic python map/reduce job
+
+first we'll do a purely computational task, breaking up an embarrassingly parallel job across the Spark nodes. Note that if we try to have as many as 10 million parallel tasks, Spark will hang. This is because each task involves some overhead and with that many tasks the overhead is too great [get more details].
+
+So code like this would fail with num_samples set to 50,000,000 but not to 10,000,00:
+```engine='python', eval=FALSE
+import numpy.random as rand
+NUM_SAMPLES=10000000
+def sample(p):
+    x, y = rand.random(), rand.random()
+    return 1 if x*x + y*y < 1 else 0
+
+count = sc.parallelize(xrange(0, NUM_SAMPLES)).map(sample) \
+             .reduce(lambda a, b: a + b)
+print "Pi is roughly %f" % (4.0 * count / NUM_SAMPLES)
+``
+
+Note that by starting Python via PySpark, the `sc` object is created and available to you.
+
+In this code, the sample() function is the mapper and the lambda (anonymous) addition function is the reducer. 
+
+Instead, we'll split up our calculation into many fewer chunks with more calculation per chunk. We'll run this as a Python command line script (see piCalc.py).
+
+```engine='python', eval=FALSE
+# insert piCalc.py
+```
+
+Which can be run from the command line as for 100m samples and 1000 tasks as:
+```engine='bash', eval=FALSE
+pyspark mypi.py `cat /root/spark-ec2/cluster-url` 100000000 1000
+```
+
+The pi calculation used a global reduction. We can also do the following:
+
+see help(sc) within python for info on the various methods we can use
+
+* reduce by key
+* flatMap
+
+* RDDs and pair RDDs
+
+So we'll do our app
+
+ok, have a couple examples
+
+# monitoring
+show hdfs and spark monitoring via UI
+
+# actual big problem - e.g. a huge regression
+
+let's say log regr with IRLS (and possible asymp cov - inverse of XtWX where w = p(1-p))
+can't have p be too big so matrix calcs not bad
+perhaps just generate simulated data?
+
+say 100m obs, 1000 vars
+
+if store 6 dec places for doubles in text file, it's not much bigger than binary
+
+airline dataset has: 123m records, about 350 airports
+12Gb as unzipped csv
+
+if large p, do blocked; perhaps have sparse?
+1.7m obs, 60k vars
+
+refer to glmnet for penalized fitting, but still parallel over obs
+cycle through vars in blocks
+
+# mllib
+
+maybe show the SGD lin regr example
+
+# getting data into hdfs
+
+ok, from local files
+
+# getting data off of S3
+
+use distcp; need to start up jobtracker/tasktrcker
+need ///user
+need credentials in the .xml file
+
+# RNG
+
+set seed based off task id, passed in via sc.parallelize
+
+
+maybe mention data.table for inmemory but fast; could compare to dplyr and whatnot
+
+# debugging
+
+do .take(1) and try your python map functions on that
+or .take(5) and try reduce on that
+
+# notes:
+mapped function is called once per value, grouped by slices, so 
+xrange(0,10), 2
+has 2 groups of 5
+
+# Batch jobs
+
+batch job syntax - see pyspark examples e.g. logistic regression
+
+# Tips
+
+make sure you know what kind of Python object is in use for each observation in the RDD - originally it's just a text line from CSV
+after mapping it will be a tuple
+it's good to check your code on individual elements - you can use take(1) to get an observation back to the master for inspection
+
+Given the lazy evaluation, it can be hard to know how long each computation takes. Sometimes you may want to do a .count() or .take(1) to force evaluation of previous steps.
+
+# Alternatives
+
+mention Shark
+
+SAS on disk data processing
+
+ff in R for on disk data processing
+
+SQL on disk processing (e.g., from R or Python)
+
+R in memory via data.table fast processing
+
+distributed R - pbd - how much useful for data processing vs lin alg?
+
+big matrix and lm/glm stuff: pbdR, updates to LAPACK, ScaLAPACK for distrib/GPU lin algebra
+
+Python alternatives? - waiting on Jarrod
+
+# More info: AmpCamp and other stuff
