@@ -35,25 +35,25 @@ Rscript -e "library(knitr); knit2html('spark.Rmd')"
 #pandoc --mathjax --number-sections spark.md -o spark.html
 ```
 
-To get the airline dataset we'll be using as a running example, you can download from [this URL](http://www.stat.berkeley.edu/share/paciorek/1987-2008.csvs.tgz) or as individual .bz2 files from `http://www.stat.berkeley.edu/share/paciorek/{1987,...,2008}.csv.bz2`.  To unzip the single file: ```tar -xvzf 1987-2008.csvs.tgz```.
+To get the airline dataset we'll be using as a running example, you can download from [this URL](http://www.stat.berkeley.edu/share/paciorek/1987-2008.csvs.tgz) or as individual .bz2 files from `http://www.stat.berkeley.edu/share/paciorek/{1987,...,2008}.csv.bz2`. The demo code later in this document will do the downloading automatically.
 
 
 I'm using the R extension of Markdown for ease of dealing with Latex equations, though it is admittedly a bit strange to use R Markdown for a tutorial that doesn't involve R. For the most part this could have just been done as a Markdown document.
 
 # 1) Introduction
 
-## Hadoop, MapReduce, and Spark
+## 1.1) Hadoop, MapReduce, and Spark
 
 The goal of this tutorial is to introduce Hadoop-style distributed computing for statistical use. We'll focus on using MapReduce algorithms for data preprocessing and statistical model fitting. We'll make use of the Hadoop distributed file system (HDFS) for storing data and of Amazon's EC2 for creating virtual Linux clusters on which to do our computation.
 
-To do all this we'll be making use of [Spark](http://spark.apache.org), a project out of the AmpLab here at Berkeley that aims to greatly increase the speed of Hadoop MapReduce by keeping data in memory when possible. 
+To do all this we'll be making use of [Spark](http://spark.apache.org), a project out of the AMPLab here at Berkeley that aims to greatly increase the speed of Hadoop MapReduce by keeping data in memory when possible. 
 
-Spark allows one to write code in Java, Scala, and Python. We'll use the Python interface, called PySpark, as it is more widely known in the Statistics and Economics communities and should be easier to get started with for those who don't know any of those languages. 
+Spark allows one to write code in Java, Scala, and Python. We'll use the Python interface, called PySpark, as Python is more widely known in the Statistics and Economics communities and should be easier to get started with for those who don't know any of those languages. 
 
 I won't assume knowledge of Python but will assume basic familiarity with operating in UNIX shell and with a scripting languages similar to Python such as R or Matlab. We'll also make use of some basic concepts of object-oriented programming.
 
 
-## Some Cautionary Notes
+## 1.2) Some Cautionary Notes
 
 1. Since PySpark involves serializing Python objects to pass them to Java, it may be slower than using Java or Scala for your MapReduce code.  Here's a [thread with some info](http://apache-spark-user-list.1001560.n3.nabble.com/Scala-vs-Python-performance-differences-td4247.html).
 
@@ -61,13 +61,19 @@ I won't assume knowledge of Python but will assume basic familiarity with operat
 
 3. Note that I've found the error messages in Spark (and also Hadoop) to be often very hard to understand. Some of this is because the messages are from the underlying Java implementation. So the process of figuring out syntax can be a bit painful at times. As usual, it's good to start with small test problems and to the extent possible test your Python code does what you expect before using that Python code in a Spark operation.
 
-## Getting Spark running on an EC2-based cluster
+## 1.3) Getting Spark running on an EC2-based cluster
 
 We'll focus on using the Amazon EC2 tools provided in the Spark software to start up an EC2 cluster with Spark and a distributed file system (the HDFS) already set up.
 
-We'll use the `spark-ec2` script available on the SCF Linux machines. You can also download and unzip the source code from the [Spark downloads page](http://spark.apache.org/downloads.html). Select the current release, the "Source Code" package type and "Directo Download" and then download the .tgz file. Simply unzip the .tgz file and navigate to the ec2 directory and you'll find the `spark-ec2` script there. For this tutorial we'll be using Spark 1.1.0.
+We'll use the *spark-ec2* script provided by Spark.  To get the script, download and unzip the source code from the [Spark downloads page](http://spark.apache.org/downloads.html). Select the current release, the "Source Code" package type and "Direct Download" and then download the .tgz file. Simply unzip the .tgz file and navigate to the ec2 directory and you'll find the `spark-ec2` script there. For this tutorial we'll be using Spark 1.1.0.
 
-### Starting your cluster
+```{r, engine='bash'}
+SPARK_VERSION=1.1.0
+tar -xvzf spark-${SPARK_VERSION}.tgz
+cd spark-${SPARK_VERSION}/ec2
+```
+
+### 1.3.1) Starting your cluster
 
 First let's launch an EC2 cluster. We can choose the number of slave nodes. You'll need to have the authentication information for your Amazon AWS account as well as have generated an SSH public-private key pair for use with your Amazon account. 
 
@@ -125,7 +131,7 @@ Note that when you want to shut down your cluster (and remember it will cost you
 ./spark-ec2 --region=${REGION} destroy sparkvm
 ```
 
-### Navigating around your cluster
+### 1.3.2) Navigating around your cluster
 
 First we'll login to the master node of our cluster.
 ```{r, engine='bash'}
@@ -153,7 +159,7 @@ Spark provides graphical interfaces that allow you to view the status of the sys
 2. `http://<master_url>:4040` -- information about the Spark tasks being executed
 3. `http://<master_url>:50070` -- information about the HDFS
 
-### Getting data onto your cluster and onto the HDFS
+### 1.3.3) Getting data onto your cluster and onto the HDFS
 
 Here are some options. 
 
@@ -221,13 +227,15 @@ export PATH=${PATH}:/root/spark/bin
 pyspark
 ```
 
-## Background
+## 2.1) Background
 
-Spark is AmpLab's effort to create a version of Hadoop that uses memory as much as possible to reduce the speed of computation, particularly for iterative computations. So in addition to the distributed file system, you can think of Spark as providing you with access to distributed memory - the collective memory of all of the nodes in your cluster. However, that memory is still physically separated so you're not operating as if you had a single machine. But the abstractions provided by Spark allow you to do a lot of computations that would be a pain to program yourself even with access to a cluster and use of something like MPI for passing messages between machines. 
+Spark is AMPLab's effort to create a version of Hadoop that uses memory as much as possible to reduce the speed of computation, particularly for iterative computations. So in addition to the distributed file system, you can think of Spark as providing you with access to distributed memory - the collective memory of all of the nodes in your cluster. However, that memory is still physically separated so you're not operating as if you had a single machine. But the abstractions provided by Spark allow you to do a lot of computations that would be a pain to program yourself even with access to a cluster and use of something like MPI for passing messages between machines. 
 
-## Reading data into Spark and doing basic manipulations
+## 2.2) Reading data into Spark and doing basic manipulations
 
-### Reading from HDFS
+### 2.2.1) Reading data into Spark
+
+#### Reading from HDFS
 
 First we'll see how to read data into Spark from the HDFS and do some basic manipulations of the data.
 
@@ -258,7 +266,7 @@ Note the ":" to separate the two parts of your AWS credential information.  That
 
 
 
-### Subsetting in Spark
+### 2.2.2) Subsetting in Spark
 
 The next thing we could do is subset the dataset using the `filter()` method. Here's an example:
 
@@ -275,7 +283,7 @@ Or I could save the subset as a new HDFS dataset that I could transfer back to t
 sfo_lines.saveAsTextFile('/data/airline-sfo')
 ```
 
-### Stratifying in Spark
+### 2.2.3) Stratifying in Spark
 
 Now suppose I want to use Spark to do some stratification. Here's a very basic stratification. I'm going to group by departure airport and then count the number of departing flights. I'll use a mapper (`createKeyValue`) to create key-value pairs where the key is the departure airport and the value is just a 1 and then I do a reduction, stratifying by key, where I simply count the records associated with each key by using `add` as the reduce function. In Python, the key-value pairs are just a 2-element tuple (I think a 2-element list would be fine), but the value could be arbitrarily more complicated than the scalar quantity 1 that I use here. 
 
@@ -294,7 +302,7 @@ result = lines.map(createKeyValue).countByKey()
 ```
 
 
-### Getting a few elements for inspection and debugging
+### 2.2.4) Getting a few elements for inspection and debugging
 
 One useful thing is to be able to grab a single element or a few elements from an Spark dataset. This allows us to look at the structure of units in the dataset and test our code by applying our Python functions directly to the units.
 
@@ -308,17 +316,17 @@ twoKeyCounts = keyValues.reduceByKey(add).take(2)
 Make sure you know what kind of Python object is in use for each observation in the RDD - originally it's just a text line from CSV, but after mapping it would often be a tuple or a list. It's good to check your code on individual elements or pairs of elements from the RDD - you can use take(1) to get an observation back to the master for inspection
 
 
-## Some fundamental ideas in MapReduce and Spark
+## 2.3) Some fundamental ideas in MapReduce and Spark
 
 Now that we've seen a few example computations, let's step back and discuss a few concepts.
 
-### RDDs
+### 2.3.1) RDDs
 
 Spark datasets are called Resilient Distributed Datasets (RDDs). Spark operations generally take the form of a method applied to an RDD object and the methods can be chained together, as we've already seen. 
 
 Note also the `sc` object we used for reading from the HDFS was a SparkContext object that encapsulates information about the Spark setup. The `textfile()` function was a method used with SparkContext objects.
 
-### MapReduce
+### 2.3.2) MapReduce
 
 MapReduce is a sort of meta-algorithm. If you can write your algorithm/computation as a MapReduce algorithm, then you should be able to implement it in Spark or in standard Hadoop, including Amazon's Elastic MapReduce framework. 
 
@@ -326,11 +334,11 @@ The basic idea is that your computation be written as a one or more iterations o
 
 In addition we can pass shared data to all the nodes via a broadcast step. This will often be important in iterative calculations. E.g., we might broadcast the current parameter values in an iterative optimization computation. 
 
-### Caching
+### 2.3.3) Caching
 
 Spark by default will try to manipulate RDDs in memory if they fit in the collective memory of the nodes. You can tell Spark that a given RDD should be kept in memory so that you can quickly access it later by using the `cache()` method. To see the RDDs that are cached in memory, go to `http://<master_url>:4040`. XXXX - point them specifically where
 
-### Partitions and repartitioning
+### 2.3.4) Partitions and repartitioning
 
 The number of chunks your dataset is broken into can greatly impact computational efficiency. When a map function is applied to the RDD, the work is broken into one task per partition. 
 
@@ -339,13 +347,13 @@ For load-balancing you'll want at least as many partitions as total computationa
 One example here is that the original airline dataset will be in 23 partitions, one per input CSV file, and those partitions are different sizes because the data size varies by year. So it's a good idea to repartition the dataset as you do initial manipulations on it.
 
 
-## Additional data processing in Spark
+## 2.4) Additional data processing in Spark
 
 Now let's do some aggregation/summarization calculations. One might do this sort of thing in the process of reducing down a large dataset to some summary values on which to do the core analysis.
 
 First we'll do some calculations involving sums/means that naturally fit within a MapReduce paradigm and then we'll do a median calculation, which is not associative and communative so is a bit harder. 
 
-### Calculating means as a simple MapReduce task
+### 2.4.1) Calculating means as a simple MapReduce task
 
 Here we'll compute the mean departure delay by airline-month-origin-destination sets. So we'll create a compound key and then do reduction separately for each key value (stratum). 
 
@@ -375,7 +383,7 @@ means = [(val[0], val[1][0]/val[1][1]) for val in results]
 
 Note that we wrote our own reduce function because Python lists/tuples don't add in a vectorized fashion so we couldn't just use `operator.add()`, but if we had made the values in the key-value pairs to be numpy arryas we could have just done reduceByKey(add). 
 
-### Calculating medians as a non-standard MapReduce task
+### 2.4.2) Calculating medians as a non-standard MapReduce task
 
 This will be more computationally intensive because we don't have an associative and commutative function for reduction. Instead we need all the values for a given key to calculate the summary statistic of interest. So we use groupByKey() and then apply the median function to the RDD where each key has as its value the entire set of values for that key from the mapper. I suspect that Spark/Hadoop experts would frown on what I do here as it wouldn't scale as the strata sizes increase, but it seems fairly effective for these sizes of strata.
 
@@ -396,7 +404,7 @@ medianResults = output.map(medianFun).collect()
 ```
 
 
-### Stratifying data and exporting
+### 2.4.3) Stratifying data and exporting
 
 Now suppose we wanted to create multiple datasets, one per stratum. This does not fit all that well into the MapReduce/HDFS paradigm. We could loop through the unique values of the stratifying variable using filter() and saveAsTextFile() as seen above. There are not really any better ways to do this, but if we first sort by key, that can improve our speed. Here I'll stratify by departure airport.
 
@@ -420,7 +428,7 @@ Note the use of the broadcast() method to send out the value of a variable to al
 The repartition(1) ensures that the entire RDD for a given key is on a single partition so that we get a single file for each stratum instead of having each stratum split into pieces across the different nodes hosting the HDFS. The mapper simply pulls out the value for each key-value pair. 
 
 
-## Doing simulation via a simple MapReduce calculation
+## 2.5) Doing simulation via a simple MapReduce calculation
 
 We'll do a simulation to estimate the value of $\pi$ as an embarrassingly parallel calculation using MapReduce.
 
@@ -477,11 +485,11 @@ count = sumVals.reduce(lambda a, b: a + b)
 
 I've added the .cache() method here so that values are kept in memory for faster processing in subsequent steps.
 
-## RNG
+## 2.6) RNG
 
 A basic approach to deal with parallel random number generation (RNG) is to set  the seed based on the task id, e.g., passed in via `parallelize()` above.
 
-## Using PySpark in batch (non-interactive mode)
+## 2.7) Using PySpark in batch (non-interactive mode)
 
 We can also do that calculation as a batch job.
 
@@ -520,7 +528,7 @@ spark-submit piCalc.py 100000000 1000
 
 # 3) Model fitting with Spark
 
-## Regression example with sufficient statistics
+## 3.1) Regression example with sufficient statistics
 
 Suppose we wanted to run a regression with very many observations, `n`, but relatively few predictors, `p`. For our purposes here, let's assume $p < 5000$ so that $X\topX$ takes up only about 200 Mb. In this case we can compute the sufficient statistics, $X\topX$  and $X\top Y$ using MapReduce and return them to the master for the final calculation.
 
@@ -557,7 +565,7 @@ mles = np.linalg.solve(suffStats[0:P,0:P], suffStats[0:P,P])
 ```
 
 
-### More efficient calculation using `mapPartitions()` 
+### 3.1.1) More efficient calculation using `mapPartitions()` 
 
 That calculation of the sufficient statistics applied the linear algebra row by row. A more efficient alternative is to put all the data for a given partition into a matrix and do the linear algebra on the matrix. XXXX - say more about why
 
@@ -588,7 +596,7 @@ mles = np.linalg.solve(summStats[0:P,0:P], summStats[0:P,P])
 
 XXXX - why need list of matrix
 
-## Coordinate descent
+## 3.2) Coordinate descent for linear regression
 
 The strategy above makes a lot of sense but breaks down as $P$ gets large. We might consider coordinate descent, iterating through the individual regression coefficients. Of course this would probably be quite slow for large $P$, but it's worthwhile to illustrate and we'll see the use of coordinate descent for lasso problems in the next section.
 
@@ -662,7 +670,7 @@ for it in range(1,4):
     print("-"*100)
 ```
 
-## Lasso via coordinate descent
+## 3.3) Lasso via coordinate descent
 
 A standard approach to fitting the Lasso is coordinate descent, as done in R's glmnet package, documented here in [Friedman et al.](url).
 
@@ -674,7 +682,7 @@ To test out my code, I'm going to generate a large simulated dataset, with 10 no
 
 Note that my implementation here is the somewhat simplistic X algorithm. The Y algorithm presented in Friedman et al. makes use of the sparsity of the coefficient vector to achieve computational speedup.
 
-## Linear regression via gradient descent
+## 3.4) Linear regression via gradient descent
 
 The coordinate descent algorithm for linear regression would be slow when there are many predictors as we are doing iterations in Spark over the coordinates. It would be faster to update all the coefficients at once and have the "iteration" be done within Python in the computation of the gradient (i.e., have the for loop across predictors calculate the gradient vector in Python within a partition). 
 
@@ -734,9 +742,9 @@ for it in range(1,nIts):
     print("-"*100)
 ```
 
-## Stochastic gradient descent and MLlib
+## 3.5) Stochastic gradient descent and MLlib
 
-MLlib is the machine learning library for Spark, which implements a number of standard statistical/machine learning models/methods. We won't go into it here, but since the goal of MLlib is to provide ready-to-go functions to apply to datasets, it won't be hard for you to try it out given all of what we've seen here.
+`MLlib` is the machine learning library for Spark, which implements a number of standard statistical/machine learning models/methods. We won't go into it here, but since the goal of MLlib is to provide ready-to-go functions to apply to datasets, it won't be hard for you to try it out given all of what we've seen here.
 
 One standard method in fitting large datasets is stochastic gradient descent, which involves choosing a random subset of the observations to use to compute the gradient at each update. MLlib relies heavily on SGD and the Spark documentation provides details.
 
@@ -744,17 +752,19 @@ maybe show the SGD lin regr example
 
 # 4) Final thoughts
 
-## Running Spark serially on your own machine
+## 4.1) Running Spark serially on your own machine
 
-One should be able to test Spark readily on your own machine with the workers all operating on your single machine rather than on the nodes of a cluster. So far based on the instructions above you'll have simply unzipped the Spark tarball and not actually installed the software. To install the software, try downloading the pre-built binary at [the Spark downloads page](http://spark.apache.org/downloads.html). You might try the Hadoop 1.X version. 
+One should be able to test Spark readily on your own machine with the workers all operating on your single machine rather than on the nodes of a cluster. So far, based on the instructions above, you have simply unzipped the Spark tarball and not actually installed the software. To install the software, try downloading the pre-built binary at the [Spark downloads page](http://spark.apache.org/downloads.html). You might try the Hadoop 1.X version. 
 
 I ran into an installation issue when installing on the SCF and haven't had a chance to get back to fix it, but if ayone wants to be able to run it on a single machine on the SCF or EML, email consult@stat.berkeley.edu or consult@econ.berkeley.edu.
 
-## Additional features of Spark
+## 4.2) Additional features of Spark
 
-Shark is Spark's database and would allow you to do SQL queries on large distributed datasets.
+Spark SQL allows you to do SQL queries on RDDs. 
 
-## Alternatives to Spark
+Spark Streaming allows you to work with data arriving in an on-line manner. 
+
+## 4.3) Alternatives to Spark
 
 Many "big data" problems will fit on disk (and sometimes even in memory on machines with a lot of memory) on a single machine. If so, you may be better off doing the work on a single machine, potentially parallelizing calculations across multiple cores on that machine. Here are some of the tools that are useful for dealing with large datasets.
 
@@ -772,10 +782,10 @@ up-coming updates to LAPACK, ScaLAPACK for linear algebra on distributed memory 
 
 Python alternatives? - waiting on Jarrod
 
-## More resources
+## 4.4) More resources
 
-See the AmpCamp run by AmpLab.
-
+  - [Here are some online resources from databricks](http://databricks.com/spark-training-resources)
+  - AMPLab runs the [AmpCamp](http://ampcamp.berkeley.edu/). The next one is Nov. 20-21, 2014, though it's expensive if you can't leverage an invitation through a connection with AMPLab.
 
 # 5) Homework
 

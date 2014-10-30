@@ -1,0 +1,43 @@
+These instructions are intended for use on a Mac or Linux machine. On Windows, you may have to tweak things and will need access to the command line. The instructions can be used on any SCF or EML machine, but I've only tested them under Linux.
+
+0) As noted in (7) below, it's important that you delete your cluster when you're not actively using it. Don't leave it running overnight or while you go off for a few hours, as you'll use up the credits we have for the workshop.
+
+1) To download Spark, go to https://spark.apache.org/downloads.html, choose 
+* 1.1.0
+* source code
+* direct download 
+
+Click on link in #4 entry. Download and untar/zip the file.
+tar -xvzf spark-1.1.0.tar.gz
+
+
+2) Create UNIX environment variables containing your AWS credentials based on the spark-workshop-2014-credentials.boto file:
+
+export AWS_ACCESS_KEY_ID=`grep aws_access_key_id spark-workshop-2014-credentials.boto | cut -d' ' -f3`
+export AWS_SECRET_ACCESS_KEY=`grep aws_secret_access_key spark-workshop-2014-credentials.boto | cut -d' ' -f3`
+
+3) Put your private SSH key file on your local machine, ideally in ~/.ssh. Change permissions on the file:
+chmod 400 ~/.ssh/spark-workshop-2014-ssh_key.pem
+
+4) Navigate to spark-1.1.0/ec2 and start a spark cluster, specifying the number of worker nodes you want in your Spark cluster:
+export NUMBER_OF_WORKERS=12
+cd spark-1.1.0/ec2
+./spark-ec2 -k <your_aws_username>@berkeley.edu:spark-workshop-2014 -i ~/.ssh/spark-workshop-2014-ssh_key.pem --region=us-west-2 -w 300 -s ${NUMBER_OF_WORKERS} -v 1.1.0 launch sparkvm-<your_name>
+
+Make sure to replace <your_name> here and below with something that will be unique to you. Otherwise there will be conflicts between your Spark cluster and Spark clusters started by other workshop participants.
+
+Occasionally you'll get some error messages and things won't start up correctly.  Just kill the cluster (see step 7 below) and try again. You might increase the number after the "-w" to increase the wait time that the Spark script uses to allow the Amazon instances to start up.
+
+5) Once it has finished the setup (it will take 5-15 minutes), you can login as follows:
+./spark-ec2 -k <your_aws_username>@berkeley.edu:spark-workshop-2014 -i ~/.ssh/spark-workshop-2014-ssh_key.pem --region=us-west-2 login sparkvm-<your_name>
+
+6) If your wireless connection on your local machine is interrupted, your connection to the Spark cluster can be affected and you might have to start over again. To protect against this, as soon as you login to the Spark cluster, do
+screen -x -RR
+
+This will put you in a shell session that you'll be able to go back to even if you lose your connection. If you lose the connection then when you connect back to the master node, type "screen -x -RR" again and you should be back where you were.
+
+6) Now you can follow the template provided in the Spark workshop notes in spark.Rmd to use Spark.
+
+7) IMPORTANT: delete your cluster as soon as you are done with it. We only have a limited number of credits for everyone in the class to use.
+
+./spark-ec2 --region=us-west-2 --delete-groups destroy sparkvm-<your_name>
