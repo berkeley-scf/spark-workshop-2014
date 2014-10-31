@@ -219,6 +219,8 @@ Rscript -e &quot;library(knitr); knit2html(&#39;spark.Rmd&#39;)&quot;
 
 <p>We&#39;ll focus on using the Amazon EC2 tools provided in the Spark software to start up an EC2 cluster with Spark and a distributed file system (the HDFS) already set up.</p>
 
+<p>Note that a detailed set of instructions that mimics those here for starting up and logging into a Spark EC2 cluster are provided in the <em>startSparkVirtualCluster.txt</em> file in the workshop Github repository.</p>
+
 <p>We&#39;ll use the <em>spark-ec2</em> script provided by Spark.  To get the script, download and unzip the source code from the <a href="http://spark.apache.org/downloads.html">Spark downloads page</a>. Select the current release, the &ldquo;Source Code&rdquo; package type and &ldquo;Direct Download&rdquo; and then download the .tgz file. Simply unzip the .tgz file and navigate to the ec2 directory and you&#39;ll find the <code>spark-ec2</code> script there. For this tutorial we&#39;ll be using Spark 1.1.0.</p>
 
 <pre><code class="bash">SPARK_VERSION=1.1.0
@@ -237,14 +239,15 @@ REGION=us-west-2
 SSH_KEY=FILL_IN_NAME_OF_YOUR_SSH_KEY
 AWS_ACCESS_KEY_ID=FILL_IN_YOUR_ACCESS_KEY
 AWS_SECRET_ACCESS_KEY=FILL_IN_YOUR_SECRET_KEY
+YOUR_NAME=SOME_UNIQUE_NAME_FOR_YOUR_CLUSTER
 cd /usr/local/linux/spark/ec2
-./spark-ec2 -k ec2star -i ~/.ssh/${SSH_KEY}.rsa --region=${REGION} -s ${CLUSTER_SIZE} -w $WAIT_TIME -v ${SPARK_VERSION} launch sparkvm
+./spark-ec2 -k ec2star -i ~/.ssh/${SSH_KEY}.rsa --region=${REGION} -s ${CLUSTER_SIZE} -w $WAIT_TIME -v ${SPARK_VERSION} launch sparkvm-${YOUR_NAME}
 </code></pre>
 
-<p>You&#39;ll need to wait for a few minutes (in particular at least the number of seconds indicated above in the WAIT_TIME variable). Look carefully for error messages as sometimes the startup of the nodes and installation of the Spark software does not go smoothly. If all goes well, the end of the messages printed to the screen should look like this  XXXX</p>
+<p>You&#39;ll need to wait for a few minutes (in particular at least the number of seconds indicated above in the WAIT_TIME variable). Look carefully for error messages as sometimes the startup of the nodes and installation of the Spark software does not go smoothly. If all goes well, the end of the messages printed to the screen should look like this:</p>
 
 <pre><code>Setting up security groups...
-Searching for existing cluster sparkvm...
+Searching for existing cluster sparkvm-${YOUR_NAME}...
 Spark AMI: ami-9a6e0daa
 Launching instances...
 Launched 3 slaves in us-west-2a, regid = r-af7e0ca4
@@ -275,18 +278,18 @@ Ganglia started at http://ec2-54-190-212-116.us-west-2.compute.amazonaws.com:508
 Done!
 </code></pre>
 
-<p>In some cases you may need to increase the wait time (the number after the -w) to ensure that the EC2 nodes start up correctly before the Spark script tries to set up the software on the nodes. Also note that I&#39;ve had other glitches in starting up a Spark cluster. You should not get messages about files not found nor should the startup interrupt you to ask you to answer any questions. If either of these happen, something may have gone wrong. Feel free to email consult@stat  if you run into problems.</p>
+<p>In some cases you may need to increase the wait time (the number after the -w) to ensure that the EC2 nodes start up correctly before the Spark script tries to set up the software on the nodes. Also note that I&#39;ve had other glitches in starting up a Spark cluster. You should not get messages about files not found nor should the startup interrupt you to ask you to answer any questions. If either of these happen, something may have gone wrong. </p>
 
 <p>Note that when you want to shut down your cluster (and remember it will cost you money as long as it is running), do the following and make sure to answer &#39;y&#39; when prompted.</p>
 
-<pre><code class="python">./spark-ec2 --region=${REGION} destroy sparkvm
+<pre><code class="python">./spark-ec2 --region=${REGION} --delete-groups destroy sparkvm-${YOUR_NAME}
 </code></pre>
 
 <h3>1.3.2) Navigating around your cluster</h3>
 
 <p>First we&#39;ll login to the master node of our cluster.</p>
 
-<pre><code class="bash">./spark-ec2 -k ${SSH_KEY} -i ~/.ssh/${SSH_KEY}.rsa --region=${REGION} login sparkvm
+<pre><code class="bash">./spark-ec2 -k ${SSH_KEY} -i ~/.ssh/${SSH_KEY}.rsa --region=${REGION} login sparkvm-${YOUR_NAME}
 </code></pre>
 
 <p>You could also login directly with ssh provided you notice the IP address of your master in the startup messages or on the AWS EC2 webpage for your AWS account:</p>
@@ -303,7 +306,7 @@ Done!
 
 <p>Once on the master, the addresses of the slave nodes are given in <code>/root/ephemeral-hdfs/conf/slaves</code>. You can choose one of them and ssh to it using the address. Then tools such as <code>top</code> will allow you to see what is going on on the machine. If you want to see what is stored in the HDFS on a given slave you can look in XXXX.</p>
 
-<p>Spark provides graphical interfaces that allow you to view the status of the system. Open a browser on your local machine. You&#39;ll need the IP address (I&#39;ll call this <master_url> below) stored in <code>/root/ephemeral-hdfs/conf/masters</code> on the master node.  Here are the web interfaces you might take a look at:</p>
+<p>Spark provides graphical interfaces that allow you to view the status of the system. Open a browser on your local machine. You&#39;ll need the IP address (I&#39;ll call this <code>&lt;master_url&gt;</code> below) stored in <code>/root/ephemeral-hdfs/conf/masters</code> on the master node.  Here are the web interfaces you might take a look at:</p>
 
 <ol>
 <li><code>http://&lt;master_url&gt;:8080</code> &ndash; general information about the Spark cluster</li>
@@ -347,17 +350,15 @@ hadoop fs -ls /data/airline
 <pre><code class="bash"># start MapReduce processes
 /root/ephemeral-hdfs/bin/start-mapred.sh
 hadoop fs -mkdir /data/ngrams
-hadoop distcp -D fs.s3n.awsAccessKeyId=&lt;AWS_ACCESS_KEY_ID&gt; -D fs.s3n.awsSecretAccessKey=&lt;AWS_SECRET_ACCESS_KEY&gt; \
+hadoop distcp -D fs.s3n.awsAccessKeyId=&quot;&lt;AWS_ACCESS_KEY_ID&gt;&quot; -D fs.s3n.awsSecretAccessKey=&quot;&lt;AWS_SECRET_ACCESS_KEY&gt;&quot; \
    s3n://datasets.elasticmapreduce/ngrams/books/20090715/eng-us-all/1gram hdfs:///data/ngrams
 </code></pre>
 
-<p>You&#39;ll need to use your AWS account information in place of the <AWS_ACCESS_KEY_ID> and <AWS_SECRET_ACCESS_KEY> strings here. Also check to see whether you need &ldquo;s3&rdquo; or &ldquo;s3n&rdquo; for the dataset you are interested in. Also, you may want to see if the dataset is stored in a particular AWS region as this may incur additional charges to transfer across regions. If so you may want to start up your cluster in the region in which the data reside. </p>
+<p>You&#39;ll need to use your AWS account information in place of the <code>&lt;AWS_ACCESS_KEY_ID&gt;</code> and <code>&lt;AWS_SECRET_ACCESS_KEY&gt;</code> strings here. Also check to see whether you need &ldquo;s3&rdquo; or &ldquo;s3n&rdquo; for the dataset you are interested in. Also, you may want to see if the dataset is stored in a particular AWS region as this may incur additional charges to transfer across regions. If so you may want to start up your cluster in the region in which the data reside. </p>
 
-<p>Note that in general you want your dataset to be split into multiple chunks but not so many that each chunk is tiny (HDFS has trouble when there are millions of files), nor so few that the dataset can&#39;t be distributed across the nodes of the distributed file system. However, in terms of the latter, one can &ldquo;repartition&rdquo; the data in Spark. </p>
+<p>Note that in general you want your dataset to be split into multiple chunks but not so many that each chunk is tiny (HDFS has trouble when there are millions of files &ndash; see <a href="http://blog.cloudera.com/blog/2009/02/the-small-files-problem/">this explanation</a>, nor so few that the dataset can&#39;t be distributed across the nodes of the distributed file system or cannot be distributed roughly equally in size across the nodes. However, in terms of the latter issues, one can &ldquo;repartition&rdquo; the data in Spark.  </p>
 
-<p>[more details on file size]</p>
-
-<p>If you&#39;ve done some operations and created a dataset (called airline-sfo here) on the HDFS that you want to transfer back to the master node, you can do the following. Note that this may give you back a dataset broken into pieces (one per Spark partition) so you may need to use UNIX tools to combine into one file.</p>
+<p>If you&#39;ve done some operations and created a dataset (called <em>airline-sfo</em> here) on the HDFS that you want to transfer back to the master node, you can do the following. Note that this may give you back a dataset broken into pieces (one per Spark partition) so you may need to use UNIX tools to combine into one file.</p>
 
 <pre><code class="bash">hadoop fs -copyToLocal /data/airline-sfo /mnt/airline-sfo
 </code></pre>
@@ -366,7 +367,7 @@ hadoop distcp -D fs.s3n.awsAccessKeyId=&lt;AWS_ACCESS_KEY_ID&gt; -D fs.s3n.awsSe
 
 <p>Ok, now we&#39;re in a position to do computations with Spark. </p>
 
-<p>We can run PySpark in the form of a Python command line interpreter session or in batch mode to run the steps in a file of PySpark/Python code.</p>
+<p>We can run PySpark in the form of a Python command line interpreter session or in batch mode to run the code from a PySpark/Python code file.</p>
 
 <p>To start PySpark in an interactive session, we do this</p>
 
@@ -392,7 +393,52 @@ lines.count()
 
 <p>The <code>textFile()</code> method reads the data from the airline directory, dealing with the compression and with the various files that data is split into. </p>
 
-<p>Note that the first line seems to take no time at all. That is because Spark uses lazy evaluation, delaying evaluation of code until it needs to actually produce a result. So sometimes it can be hard to figure out how long each piece of a calculation takes because multiple pieces are being combined together.</p>
+<p>Note that the first line seems to take no time at all. That is because Spark uses <strong>lazy evaluation</strong>, delaying evaluation of code until it needs to actually produce a result. So sometimes it can be hard to figure out how long each piece of a calculation takes because multiple pieces are being combined together. I&#39;ll sometimes do a <code>count()</code> just to force the evaluation of the previous command.</p>
+
+<p>You should see a bunch of logging messages that look like this:</p>
+
+<pre><code>14/10/31 01:15:53 INFO mapred.FileInputFormat: Total input paths to process : 22
+14/10/31 01:15:53 INFO spark.SparkContext: Starting job: count at &lt;stdin&gt;:1
+14/10/31 01:15:53 INFO scheduler.DAGScheduler: Got job 3 (count at &lt;stdin&gt;:1) with 22 output partitions (allowLocal=false)
+14/10/31 01:15:53 INFO scheduler.DAGScheduler: Final stage: Stage 3(count at &lt;stdin&gt;:1)
+14/10/31 01:15:53 INFO scheduler.DAGScheduler: Parents of final stage: List()
+14/10/31 01:15:53 INFO scheduler.DAGScheduler: Missing parents: List()
+14/10/31 01:15:53 INFO scheduler.DAGScheduler: Submitting Stage 3 (PythonRDD[16] at RDD at PythonRDD.scala:43), which has no missing parents
+14/10/31 01:15:53 INFO storage.MemoryStore: ensureFreeSpace(5128) called with curMem=273374, maxMem=278302556
+14/10/31 01:15:53 INFO storage.MemoryStore: Block broadcast_9 stored as values in memory (estimated size 5.0 KB, free 265.1 MB)
+14/10/31 01:15:53 INFO storage.MemoryStore: ensureFreeSpace(3265) called with curMem=278502, maxMem=278302556
+14/10/31 01:15:53 INFO storage.MemoryStore: Block broadcast_9_piece0 stored as bytes in memory (estimated size 3.2 KB, free 265.1 MB)
+14/10/31 01:15:53 INFO storage.BlockManagerInfo: Added broadcast_9_piece0 in memory on ip-10-225-185-17.us-west-2.compute.internal:54745 (size: 3.2 KB, free: 265.4 MB)
+14/10/31 01:15:53 INFO storage.BlockManagerMaster: Updated info of block broadcast_9_piece0
+14/10/31 01:15:53 INFO scheduler.DAGScheduler: Submitting 22 missing tasks from Stage 3 (PythonRDD[16] at RDD at PythonRDD.scala:43)
+14/10/31 01:15:53 INFO scheduler.TaskSchedulerImpl: Adding task set 3.0 with 22 tasks
+14/10/31 01:15:53 INFO scheduler.TaskSetManager: Starting task 0.0 in stage 3.0 (TID 6, ip-10-249-30-169.us-west-2.compute.internal, NODE_LOCAL, 1243 bytes)
+14/10/31 01:15:53 INFO scheduler.TaskSetManager: Starting task 5.0 in stage 3.0 (TID 7, ip-10-249-65-147.us-west-2.compute.internal, NODE_LOCAL, 1243 bytes)
+14/10/31 01:15:53 INFO scheduler.TaskSetManager: Starting task 1.0 in stage 3.0 (TID 8, ip-10-249-62-60.us-west-2.compute.internal, NODE_LOCAL, 1243 bytes)
+14/10/31 01:15:53 INFO scheduler.TaskSetManager: Starting task 12.0 in stage 3.0 (TID 9, ip-10-249-14-81.us-west-2.compute.internal, NODE_LOCAL, 1243 bytes)
+14/10/31 01:15:53 INFO scheduler.TaskSetManager: Starting task 2.0 in stage 3.0 (TID 10, ip-10-249-14-142.us-west-2.compute.internal, NODE_LOCAL, 1243 bytes)
+14/10/31 01:15:53 INFO scheduler.TaskSetManager: Starting task 8.0 in stage 3.0 (TID 11, ip-10-249-71-5.us-west-2.compute.internal, NODE_LOCAL, 1243 bytes)
+14/10/31 01:15:53 INFO scheduler.TaskSetManager: Starting task 3.0 in stage 3.0 (TID 12, ip-10-249-25-57.us-west-2.compute.internal, NODE_LOCAL, 1243 bytes)
+14/10/31 01:15:53 INFO scheduler.TaskSetManager: Starting task 6.0 in stage 3.0 (TID 13, ip-10-226-152-67.us-west-2.compute.internal, NODE_LOCAL, 1243 bytes)
+14/10/31 01:15:53 INFO scheduler.TaskSetManager: Starting task 9.0 in stage 3.0 (TID 14, ip-10-226-142-5.us-west-2.compute.internal, NODE_LOCAL, 1243 bytes)
+14/10/31 01:15:53 INFO scheduler.TaskSetManager: Starting task 11.0 in stage 3.0 (TID 15, ip-10-249-31-110.us-west-2.compute.internal, NODE_LOCAL, 1243 bytes
+...
+...
+14/10/31 01:15:54 INFO storage.BlockManagerInfo: Added broadcast_8_piece0 in memory on ip-10-249-71-5.us-west-2.compute.internal:49964 (size: 4.7 KB, free: 3.1 GB)
+14/10/31 01:15:54 INFO storage.BlockManagerInfo: Added broadcast_8_piece0 in memory on ip-10-249-25-57.us-west-2.compute.internal:37497 (size: 4.7 KB, free: 3.1 GB)
+14/10/31 01:15:54 INFO storage.BlockManagerInfo: Added broadcast_8_piece0 in memory on ip-10-249-62-60.us-west-2.compute.internal:56086 (size: 4.7 KB, free: 3.1 GB)
+14/10/31 01:15:57 INFO scheduler.TaskSetManager: Starting task 19.0 in stage 3.0 (TID 27, ip-10-249-31-110.us-west-2.compute.internal, ANY, 1243 bytes)
+14/10/31 01:16:14 INFO scheduler.TaskSetManager: Finished task 0.0 in stage 3.0 (TID 6) in 21020 ms on ip-10-249-30-169.us-west-2.compute.internal (1/22)
+14/10/31 01:16:29 INFO scheduler.TaskSetManager: Finished task 4.0 in stage 3.0 (TID 17) in 35919 ms on ip-10-249-15-15.us-west-2.compute.internal (2/22)
+14/10/31 01:16:31 INFO scheduler.TaskSetManager: Finished task 9.0 in stage 3.0 (TID 14) in 38311 ms on ip-10-226-142-5.us-west-2.compute.internal (3/22)
+14/10/31 01:16:37 INFO scheduler.TaskSetManager: Finished task 7.0 in stage 3.0 (TID 18) in 43942 ms on ip-10-249-30-169.us-west-2.compute.internal (4/22)
+14/10/31 01:16:55 INFO scheduler.TaskSetManager: Finished task 2.0 in stage 3.0 (TID 10) in 62229 ms on ip-10-249-14-142.us-west-2.compute.internal (5/22)
+...
+</code></pre>
+
+<p>There are 22 tasks because there are 22 data files. Each task is done as a single process on one of the nodes. </p>
+
+<p>You should see there are about 123 million observations (rows) in the dataset (the dataset is an <em>RDD</em> object). More on RDDs in a bit.</p>
 
 <h4>Reading into Spark from S3</h4>
 
@@ -401,13 +447,45 @@ lines.count()
 <pre><code class="python">lines = sc.textFile(&quot;s3n://&lt;AWS_ACCESS_KEY_ID&gt;:&lt;AWS_SECRET_ACCESS_KEY&gt;@datasets.elasticmapreduce/ngrams/books/20090715/eng-us-all/1gram&quot;)
 </code></pre>
 
-<p>XXX - TEST THIS</p>
-
 <p>Note the &ldquo;:&rdquo; to separate the two parts of your AWS credential information.  That was to read from a set of files but you could also point to a specific individual file. And you may be able to use wildcards.</p>
 
-<p>#lines = sc.textFile(&ldquo;s3n://&lt;&gt;:&lt;&gt;@berkeley-scf-test/test/2009_nfl_pbp_data.csv&rdquo;) </p>
+<p>Note that if either of your AWD credential strings has a &ldquo;/&rdquo; in it, that can cause problems because it will be interpreted as a file path separator (&ldquo;:&rdquo; would probably also cause similar problems). As an alternative, you can add your credentials in the following format as lines in the  <code>/root/ephemeral-hdfs/conf/core-site.xml</code> configuration file.</p>
 
-<p>#That was for a single CSV, but if you had a directory of them, I think you could give the directory name and/or use wildcards. </p>
+<pre><code>&lt;property&gt;
+  &lt;name&gt;fs.s3n.awsAccessKeyId&lt;/name&gt;
+  &lt;value&gt;YOUR_AWS_ACCESS_KEY_ID&lt;/value&gt;
+&lt;/property&gt;
+&lt;property&gt;
+  &lt;name&gt;fs.s3n.awsSecretAccessKey&lt;/name&gt;
+  &lt;value&gt;YOUR_AWS_SECRET_ACCESS_KEY&lt;/value&gt;
+&lt;/property&gt;
+</code></pre>
+
+<p>In that case you would just do:</p>
+
+<pre><code class="python">lines = sc.textFile(&quot;s3n://datasets.elasticmapreduce/ngrams/books/20090715/eng-us-all/1gram&quot;)
+</code></pre>
+
+<p>The Google ngrams data is somewhat big so that may take a while. To test that things are working, try this test file:</p>
+
+<pre><code class="python">lines = sc.textFile(&quot;s3n://&lt;AWS_ACCESS_KEY_ID&gt;:&lt;AWS_SECRET_ACCESS_KEY&gt;@berkeley-scf-test/test/2009_nfl_pbp_data.csv&quot;) 
+lines.count()
+</code></pre>
+
+<p>You should get that there are 43064 lines.</p>
+
+<p>To get a directory of files rather than a single file you should be able to give a directory name, and I think wildcards are also allowed to indicate multiple files.</p>
+
+<h4>Repartitioning the input</h4>
+
+<p>To better distribute the data across the nodes, I&#39;m going to repartition the dataset into more than 22 chunks.</p>
+
+<pre><code class="python">lines = sc.textFile(&#39;/data/airline&#39;).repartition(192).cache()
+</code></pre>
+
+<p>And I also &ldquo;cached&rdquo; the RDD so that it is retained in memory for later processing steps.</p>
+
+<p>We&#39;ll come back to both of these ideas in a bit.</p>
 
 <h3>2.2.2) Subsetting in Spark</h3>
 
@@ -417,40 +495,76 @@ lines.count()
 sfo_lines.count()
 </code></pre>
 
-<p>Notice my anonymous (lambda) function used as the filter where the filtering function should produce a single boolean.</p>
+<p>The filtering function (in this case my anonymous (lambda) function) should produce a single boolean. I could have used a named function here too.</p>
 
-<p>Or I could save the subset as a new HDFS dataset that I could transfer back to the standard filesystem on the master using hdfs&#39;s copyToLocal command.</p>
+<p>There are 2373910 observations corresponding to flights from SFO.</p>
+
+<p>Note that the processing here shows 192 tasks, corresponding to the now 192 partitions.</p>
+
+<h3>2.2.3) Extracting data from an RDD</h3>
+
+<p>If the subset is sufficiently small we can pull it into Python as a standard Python object in the PySpark/Python session on our master node.</p>
+
+<pre><code class="python">sfo = sfo_lines.collect()
+type(sfo) 
+# &lt;type &#39;list&#39;&gt;
+len(sfo) 
+# 2733910
+sfo[1] 
+# u&#39;1992,1,2,4,708,705,1243,1222,US,1118,NA,215,197,NA,21,3,SFO,MCI,1499,NA,NA,0,NA,0,NA,NA,NA,NA,NA&#39;
+</code></pre>
+
+<p>Or I could save the subset as a new HDFS dataset that I could transfer back to the standard filesystem on the master using the HDFS <code>copyToLocal</code> command from the UNIX prompt on the master node.</p>
 
 <pre><code class="python">sfo_lines.saveAsTextFile(&#39;/data/airline-sfo&#39;)
 </code></pre>
 
-<h3>2.2.3) Stratifying in Spark</h3>
+<h3>2.2.4) Stratifying in Spark</h3>
 
-<p>Now suppose I want to use Spark to do some stratification. Here&#39;s a very basic stratification. I&#39;m going to group by departure airport and then count the number of departing flights. I&#39;ll use a mapper (<code>createKeyValue</code>) to create key-value pairs where the key is the departure airport and the value is just a 1 and then I do a reduction, stratifying by key, where I simply count the records associated with each key by using <code>add</code> as the reduce function. In Python, the key-value pairs are just a 2-element tuple (I think a 2-element list would be fine), but the value could be arbitrarily more complicated than the scalar quantity 1 that I use here. </p>
+<p>Now suppose I want to use Spark to do some stratification. Here&#39;s a very basic stratification. We&#39;ll do it using MapReduce.</p>
 
-<pre><code class="python">def createKeyValue(line):
+<p>I&#39;m going to group by departure/arrival airport pairs and then count the number of flights. I&#39;ll use a mapper, <code>createKeyValue()</code>, to create key-value pairs where the key is the route and the value is just a 1 and then I do a reduction, stratifying by key, where I simply count the records associated with each key by using <code>add</code> as the reduce function. In Python, the key-value pairs are just a 2-element tuple (I think a 2-element list would be fine), but the value could be arbitrarily more complicated than the scalar quantity 1 that I use here. </p>
+
+<pre><code class="python">from operator import add
+
+def createKeyValue(line):
     vals = line.split(&#39;,&#39;)
-    return(vals[16], 1)
+    return(vals[16]+&#39;-&#39;+vals[17], 1)
 
-result = lines.map(createKeyValue).reduceByKey(add).collect()
+routeCount = lines.map(createKeyValue).reduceByKey(add).collect()
+
+mx = routeCount[0]
+for i in xrange(len(routeCount)):
+     if routeCount[i][1] &gt; mx[1]:
+        mx = routeCount[i]
 </code></pre>
 
-<p>I wrote that as above to illustrate key-value pairs and using a map-reduce pair of functions, but for simply counting, I could have done this instead:</p>
+<p>Any guesses about the route with the most flights?</p>
 
-<pre><code>result = lines.map(createKeyValue).countByKey()
+<p>I wrote that as presented above to illustrate key-value pairs and using a map-reduce pair of functions, but for simply counting, I could have done it more efficiently like this:</p>
+
+<pre><code>routeCount2 = lines.map(createKeyValue).countByKey()
 </code></pre>
 
-<h3>2.2.4) Getting a few elements for inspection and debugging</h3>
+<p>Note that the result is a dictionary not a list.</p>
+
+<h3>2.2.5) Getting a few elements for inspection and debugging</h3>
 
 <p>One useful thing is to be able to grab a single element or a few elements from an Spark dataset. This allows us to look at the structure of units in the dataset and test our code by applying our Python functions directly to the units.</p>
 
 <pre><code>oneLine = lines.take(1)
+# test my createKeyValue() function:
+createKeyValue(oneLine)
+createKeyValue(oneLine[0])
 keyValues = lines.map(createKeyValue).cache()
 twoKeyValues = keyValues.take(2)
+twoKeyValues
+# [(u&#39;AVPPIT&#39;, 1), (u&#39;LAXIND&#39;, 1)]
 twoKeyCounts = keyValues.reduceByKey(add).take(2)
+# [(u&#39;ORDSEA&#39;, 101949), (u&#39;MCIMSY&#39;, 925)]
 </code></pre>
 
-<p>Make sure you know what kind of Python object is in use for each observation in the RDD - originally it&#39;s just a text line from CSV, but after mapping it would often be a tuple or a list. It&#39;s good to check your code on individual elements or pairs of elements from the RDD - you can use take(1) to get an observation back to the master for inspection</p>
+<p>Make sure you know what kind of Python object is in use for each observation in the RDD - originally it&#39;s often just a text line from CSV, but after mapping it would often be a tuple or a list. It&#39;s good to check your code on individual elements or pairs of elements from the RDD obtained via <code>take()</code>. Note that sometimes things will be embedded in a list and you&#39;ll need to burrow into it as seen in the example where we had a list of length one containing the string.</p>
 
 <h2>2.3) Some fundamental ideas in MapReduce and Spark</h2>
 
@@ -460,27 +574,33 @@ twoKeyCounts = keyValues.reduceByKey(add).take(2)
 
 <p>Spark datasets are called Resilient Distributed Datasets (RDDs). Spark operations generally take the form of a method applied to an RDD object and the methods can be chained together, as we&#39;ve already seen. </p>
 
-<p>Note also the <code>sc</code> object we used for reading from the HDFS was a SparkContext object that encapsulates information about the Spark setup. The <code>textfile()</code> function was a method used with SparkContext objects.</p>
+<p>Note also the <em>sc</em> object we used for reading from the HDFS was a <em>SparkContext</em> object that encapsulates information about the Spark setup. The <code>textfile()</code> function is a method used with SparkContext objects.</p>
 
-<h3>2.3.2) MapReduce</h3>
+<h3>2.3.2) Caching</h3>
 
-<p>MapReduce is a sort of meta-algorithm. If you can write your algorithm/computation as a MapReduce algorithm, then you should be able to implement it in Spark or in standard Hadoop, including Amazon&#39;s Elastic MapReduce framework. </p>
+<p>Spark by default will try to manipulate RDDs in memory if they fit in the collective memory of the nodes. You can tell Spark that a given RDD should be kept in memory so that you can quickly access it later by using the <code>cache()</code> method. To see the RDDs that are cached in memory, go to <code>http://&lt;master_url&gt;:4040</code> and click on the &ldquo;Storage&rdquo; tab.</p>
 
-<p>The basic idea is that your computation be written as a one or more iterations over a Map step and a Reduce step. The map step takes each &#39;observation&#39; (each unit that can be treated independently) and applies some transformation to it. Think of a mathematical mapping. The reduction step then collects the results and does some sort of aggregation operation that returns a summary measure. Sometimes the mapping step involves computing a key value for each unit. The units that share the same key are then collected together and a reduction step may be done for each key value. We&#39;ll see a variety of MapReduce algorithms here so this should become more concrete. We may also have multiple map steps before any reduction.</p>
-
-<p>In addition we can pass shared data to all the nodes via a broadcast step. This will often be important in iterative calculations. E.g., we might broadcast the current parameter values in an iterative optimization computation. </p>
-
-<h3>2.3.3) Caching</h3>
-
-<p>Spark by default will try to manipulate RDDs in memory if they fit in the collective memory of the nodes. You can tell Spark that a given RDD should be kept in memory so that you can quickly access it later by using the <code>cache()</code> method. To see the RDDs that are cached in memory, go to <code>http://&lt;master_url&gt;:4040</code>. XXXX - point them specifically where</p>
-
-<h3>2.3.4) Partitions and repartitioning</h3>
+<h3>2.3.3) Partitions and repartitioning</h3>
 
 <p>The number of chunks your dataset is broken into can greatly impact computational efficiency. When a map function is applied to the RDD, the work is broken into one task per partition. </p>
 
 <p>For load-balancing you&#39;ll want at least as many partitions as total computational cores in your cluster and probably rather more partitions. </p>
 
-<p>One example here is that the original airline dataset will be in 23 partitions, one per input CSV file, and those partitions are different sizes because the data size varies by year. So it&#39;s a good idea to repartition the dataset as you do initial manipulations on it.</p>
+<p>As an example that we&#39;ve already seen, the original airline dataset is in 22 partitions, one per input CSV file, and those partitions are different sizes because the data size varies by year. So it&#39;s a good idea to repartition the dataset as you&#39;re doing your initial manipulations on it, as we did above. But it did take a while to do that because of all the transferring of data across nodes.</p>
+
+<h3>2.3.4) MapReduce</h3>
+
+<p>MapReduce is a sort of meta-algorithm. If you can write your algorithm/computation as a MapReduce algorithm, then you should be able to implement it in Spark or in standard Hadoop, including Amazon&#39;s Elastic MapReduce framework. </p>
+
+<p>The basic idea is that your computation be written as a one or more iterations over a <em>Map</em> step and a <em>Reduce</em> step. The map step takes each &#39;observation&#39; (each unit that can be treated independently) and applies some transformation to it. Think of a mathematical mapping. The reduction step then takes the results and does some sort of aggregation operation that returns a summary measure. Sometimes the mapping step involves computing a key for each unit. The units that share the same key are then collected together and a reduction step may be done for each key value. </p>
+
+<p>Actually, it&#39;s more general than that. We may have multiple map before any reduction or no reduction at all. And the reduction step is really just an aggregation applied to an RDD that produces another RDD. This can be done at any point and there could be multiple reductions. </p>
+
+<p>Reduction functions should be associative and commutative. It shouldn&#39;t matter what order the operations are done in or which observations are grouped with which others in order that the reduction can be done in parallel in a simple fashion.</p>
+
+<p>We&#39;ll see a variety of MapReduce algorithms here so this should become more concrete. </p>
+
+<p>In addition to map and reduce steps, we can pass shared data to all the nodes via a broadcast step. This will often be important in iterative calculations. E.g., we might broadcast the current parameter values in an iterative optimization computation. </p>
 
 <h2>2.4) Additional data processing in Spark</h2>
 
