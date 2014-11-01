@@ -472,7 +472,7 @@ In addition to map and reduce steps, we can pass shared data to all the nodes vi
 
 Now let's do some aggregation/summarization calculations. One might do this sort of thing in the process of reducing down a large dataset to some summary values on which to do the core analysis.
 
-First we'll do some calculations involving sums/means that naturally fit within a MapReduce paradigm and then we'll do a median calculation, which is not associative and communative so is a bit harder. 
+First we'll do some calculations involving sums/means that naturally fit within a MapReduce paradigm and then we'll do a median calculation, which is not associative and commutative so is a bit harder and wouldn't scale well. 
 
 ### 2.4.1) Calculating means as a simple MapReduce task
 
@@ -481,34 +481,44 @@ Here we'll compute the mean departure delay by airline-month-origin-destination 
 Our map function will exclude missing data and the header 'observations'.
 
 ```{r, engine='python'}
-def computeMapper(line):
+def mapper(line):
     vals = line.split(',')
     key = '-'.join([vals[x] for x in [8,1,16,17]])
     if vals[0] == 'Year' or vals[14] == 'NA':
        key = '0'
-       delay = 0
+       delay = 0.0
        valid = 0.0
     else: 
-       delay = float(vals(14))
+       delay = float(vals[14])
        valid = 1.0
     return(key, (delay, valid))
 
 
-def computeReducer( (dep1, valid1), (dep2, valid2) ):
+def reducer( (dep1, valid1), (dep2, valid2) ):
     return( (dep1 + dep2), (valid1 + valid2) )
 
-tmp = lines.map(computeMapper).reduceByKey(computeReducer)
+mappedLines = lines.map(mapper).cache()
+tmp = mappedLines.reduceByKey(reducer)
+tmp
+# PythonRDD[11] at RDD at PythonRDD.scala:43
 results = tmp.collect()
-means = [(val[0], val[1][0]/val[1][1]) for val in results]
+results[0:3]  
+# [(u'EA-11-ATL-DEN', (1531.0, 265.0)), (u'NW-11-MSP-SDF', (3290.0, 882.0)), (u'DL-9-SEA-JFK', (5301.0, 577.0))]
+means = [(val[0], val[1][0]/val[1][1]) for val in results if val[1][1] > 0.0]
+means[0:3]
+# [(u'EA-11-ATL-DEN', 5.777358490566038), (u'NW-11-MSP-SDF', 3.7301587301587302), (u'DL-9-SEA-JFK', 9.1871750433275565)]
+
 ```
 
-Note that we wrote our own reduce function because Python lists/tuples don't add in a vectorized fashion so we couldn't just use `operator.add()`, but if we had made the values in the key-value pairs to be numpy arryas we could have just done reduceByKey(add). 
+Note that the result of the `reduceByKey()` is just another (small) RDD.
+
+Note that we wrote our own reduce function because Python lists/tuples don't add in a vectorized fashion so we couldn't just use `operator.add()`, but if we had made the values in the key-value pairs to be *numpy* arrays we could have just done `reduceByKey(add)`. 
 
 ### 2.4.2) Calculating medians as a non-standard MapReduce task
 
-This will be more computationally intensive because we don't have an associative and commutative function for reduction. Instead we need all the values for a given key to calculate the summary statistic of interest. So we use groupByKey() and then apply the median function to the RDD where each key has as its value the entire set of values for that key from the mapper. I suspect that Spark/Hadoop experts would frown on what I do here as it wouldn't scale as the strata sizes increase, but it seems fairly effective for these sizes of strata.
+This will be more computationally intensive because we don't have an associative and commutative function for reduction. Instead we need all the values for a given key to calculate the summary statistic of interest. So we use `groupByKey()` and then apply the median function to the RDD where each key has as its value the entire set of values for that key from the mapper. I suspect that Spark/Hadoop experts would frown on what I do here as it wouldn't scale as the strata sizes increase, but it seems fairly effective for these sizes of strata.
 
-{r, engine='python'}
+```{r, engine='python'}
 def medianFun(input):
     import numpy as np
     if len(input) == 2:
@@ -520,33 +530,39 @@ def medianFun(input):
     else:
         return((input[0], -9999))
 
-output = lines.map(computeMapper).groupByKey().cache()
+output = mappedLines.groupByKey()
+output.count()
+# 186116
 medianResults = output.map(medianFun).collect()
+medianResults[0:3]
+# [(u'EA-11-ATL-DEN', 0.0), (u'NW-11-MSP-SDF', -3.0), (u'DH-8-HPN-ORD', -7.0)]
 ```
 
+Note that the median calculation is another map function not a reduce, because it's just a 1-1 transformation of the RDD that is returned by `groupByKey()`. But of course the size of the value for each key is much larger before the application of the `medianFun()` map step
 
 ### 2.4.3) Stratifying data and exporting
 
-Now suppose we wanted to create multiple datasets, one per stratum. This does not fit all that well into the MapReduce/HDFS paradigm. We could loop through the unique values of the stratifying variable using filter() and saveAsTextFile() as seen above. There are not really any better ways to do this, but if we first sort by key, that can improve our speed. Here I'll stratify by departure airport.
+Now suppose we wanted to create multiple datasets, one per stratum. This does not fit all that well into the MapReduce/HDFS paradigm. We could loop through the unique values of the stratifying variable using `filter()` and `saveAsTextFile()` as seen above. There are not really any better ways to do this, but if we first sort by key, that can improve our speed. Here I'll stratify by departure airport.
 
 ```{r, engine='python'}
-def computeMapper(line):
+def createKeyValue(line):
     vals = line.split(',')
     keyVal = vals[16]
     return(keyVal, line)
 
-output = lines.map(computeMapper).sortByKey().cache()
+output = lines.map(createKeyValue).sortByKey().cache()
 keyInfo = output.countByKey()
-keys = keyInfo.keys() # could I do output.keys()?
+keys = keyInfo.keys
 
 for curkey in keys:
     const = sc.broadcast(curkey)
-    output.filter(lambda input: curkey == input[0]).map(lambda x: x[1]).repartition(1).saveAsTextFile('/data/' + curkey)
+    fn = '/data/' + curkey
+    output.filter(lambda x: curkey == x[0]).map(lambda x: x[1]).repartition(1).saveAsTextFile(fn)
 ```
 
-Note the use of the broadcast() method to send out the value of a variable to all the workers.
+Note the use of the `broadcast()` method to send out the value of a variable to all the workers.
 
-The repartition(1) ensures that the entire RDD for a given key is on a single partition so that we get a single file for each stratum instead of having each stratum split into pieces across the different nodes hosting the HDFS. The mapper simply pulls out the value for each key-value pair. 
+The `repartition(1)` ensures that the entire RDD for a given key is on a single partition so that we get a single file for each stratum instead of having each stratum split into pieces across the different nodes hosting the HDFS. The mapper simply pulls out the value for each key-value pair. 
 
 
 ## 2.5) Doing simulation via a simple MapReduce calculation
@@ -571,9 +587,9 @@ count = sc.parallelize(xrange(0, num_slices), num_slices).map(sample).reduce(lam
 print "Pi is roughly %f" % (4.0 * count / (num_slices*samples_per_slice))
 ```
 
-Let's piece that apart. The mapping step here is to take a number, `p` and compute a bunch of random numbers, returning the number where the length of the random vector is less than one.  So `sample` is the map function
+Let's piece that apart. The mapping step here uses `sample()`, which takes an identifier, $p$, and compute a large number of random vectors, returning the number of vectors whose length is less than one.  So `sample` is the map function
 
-The reduction step is to combine all those sums into a single sum (`count`) that can then be used to estimate pi. Notice that the reduction function is just addition. The reduction operator needs to be associative and communative - it can't matter what order the values are passed to the reducer or which values are grouped together for reduction. 
+The reduction step is to combine all those sums into a single sum (`count`) that can then be used to estimate $\pi$. Notice that the reduction function is just addition. The reduction operator needs to be associative and communative - it can't matter what order the values are passed to the reducer or which values are grouped together for reduction. 
 
 A few comments here. First we could have sampled a single random vector, thereby calling parallelize across numslices*samples_per_slice, with one task per {x,y} pair. But it's much more computationally efficient to do a larger chunk of calculation in each process since there is overhead in running each process. But we want enough processes to make use of all the processors collectively in our Spark cluster and probably rather more than that in case some processors do the computation more slowly than others. Also, if the computation involved a large amount of memory we wouldn't want to exceed the physical RAM available to the processes that work simultaneously on a node. 
 
@@ -899,9 +915,16 @@ data.table in R for serial in-memory processing (this is fast if things fit in m
 
 pbd in R for distributed computation, particularly linear algebra and distributed matrices
 
+I think the thing you are asking about it called memory-mapping in Python.
+I've used this functionality in NumPy:
+http://docs.scipy.org/doc/numpy/reference/generated/numpy.memmap.html
+But it is also available (although I haven't used this) in standard Python:
+https://docs.python.org/2/library/mmap.html
+
+Manual coding to process data in batches from disk in any language
+
 up-coming updates to LAPACK, ScaLAPACK for linear algebra on distributed memory clusters and on GPUs
 
-Python alternatives? - waiting on Jarrod
 
 ## 4.4) More resources
 
