@@ -1,10 +1,7 @@
----
-title: An Introduction to Using Distributed File Systems and MapReduce through Spark
-output:
-  html_document:
-    number_sections: true
----
-
+An Introduction to Using Distributed File 
+======================================================================================
+Systems and MapReduce through Spark
+======================================================================================
 
 Chris Paciorek, Statistical Computing Facility, Department of Statistics, UC Berkeley
 
