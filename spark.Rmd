@@ -154,7 +154,7 @@ Sometimes your connection might be interrupted and you'll lose your work, so we'
 screen -x -RR
 ```
 
-Once on the master, the addresses of the slave nodes are given in `/root/ephemeral-hdfs/conf/slaves`. You can choose one of them and ssh to it using the address. Then tools such as `top` will allow you to see what is going on on the machine. If you want to see what is stored in the HDFS on a given slave you can look in XXXX.
+Once on the master, the addresses of the slave nodes are given in `/root/ephemeral-hdfs/conf/slaves`. You can choose one of them and ssh to it using the address. Then tools such as `top` will allow you to see what is going on on the machine. 
 
 Spark provides graphical interfaces that allow you to view the status of the system. Open a browser on your local machine. You'll need the IP address (I'll call this `<master_url>` below) stored in `/root/ephemeral-hdfs/conf/masters` on the master node.  Here are the web interfaces you might take a look at:
 
@@ -194,6 +194,15 @@ hadoop fs -ls /data/airline
 
 Note that the commands to interact with the HDFS are similar to UNIX commands (`mkdir`, `ls`, etc.) but they must follow the `hadoop fs -` syntax.
 
+Note that in general you want your dataset to be split into multiple chunks but not so many that each chunk is tiny (HDFS has trouble when there are millions of files -- see [this explanation](http://blog.cloudera.com/blog/2009/02/the-small-files-problem/), nor so few that the dataset can't be distributed across the nodes of the distributed file system or cannot be distributed roughly equally in size across the nodes. However, in terms of the latter issues, one can "repartition" the data in Spark.  
+
+If you've done some operations and created a dataset (called *airline-sfo* here) on the HDFS that you want to transfer back to the master node, you can do the following. Note that this may give you back a dataset broken into pieces (one per Spark partition) so you may need to use UNIX tools to combine into one file.
+
+
+```{r, engine='bash'}
+hadoop fs -copyToLocal /data/airline-sfo /mnt/airline-sfo
+```
+
 #### Copying directly from Amazon's S3 
 
 If the files are stored on Amazon's S3, you can copy directly onto the HDFS. Here's how, using the Google ngrams dataset as an example. Note that we need Hadoop's MapReduce processes running to do this distributed copy operation and Spark does not start these by default. (For doing MapReduce within Spark, we do NOT need to do this.)
@@ -207,14 +216,6 @@ hadoop distcp -D fs.s3n.awsAccessKeyId="<AWS_ACCESS_KEY_ID>" -D fs.s3n.awsSecret
 ```
 
 You'll need to use your AWS account information in place of the `<AWS_ACCESS_KEY_ID>` and `<AWS_SECRET_ACCESS_KEY>` strings here. Also check to see whether you need "s3" or "s3n" for the dataset you are interested in. Also, you may want to see if the dataset is stored in a particular AWS region as this may incur additional charges to transfer across regions. If so you may want to start up your cluster in the region in which the data reside. 
-
-Note that in general you want your dataset to be split into multiple chunks but not so many that each chunk is tiny (HDFS has trouble when there are millions of files -- see [this explanation](http://blog.cloudera.com/blog/2009/02/the-small-files-problem/), nor so few that the dataset can't be distributed across the nodes of the distributed file system or cannot be distributed roughly equally in size across the nodes. However, in terms of the latter issues, one can "repartition" the data in Spark.  
-
-If you've done some operations and created a dataset (called *airline-sfo* here) on the HDFS that you want to transfer back to the master node, you can do the following. Note that this may give you back a dataset broken into pieces (one per Spark partition) so you may need to use UNIX tools to combine into one file.
-
-```{r, engine='bash'}
-hadoop fs -copyToLocal /data/airline-sfo /mnt/airline-sfo
-```
 
 # 2) Using Spark
 
@@ -450,7 +451,7 @@ Spark by default will try to manipulate RDDs in memory if they fit in the collec
 
 The number of chunks your dataset is broken into can greatly impact computational efficiency. When a map function is applied to the RDD, the work is broken into one task per partition. 
 
-For load-balancing you'll want at least as many partitions as total computational cores in your cluster and probably rather more partitions. 
+For load-balancing you'll want at least as many partitions as total computational cores in your cluster and probably rather more partitions. The Spark documentation suggests 2-4 partitions (which they also seem to call *slices*) per CPU. Often there are 100-10,000 partitions. Another rule of thumb is that tasks should take at least 100 ms. If less than that, you may want to repartition to have fewer partitions.
 
 As an example that we've already seen, the original airline dataset is in 22 partitions, one per input CSV file, and those partitions are different sizes because the data size varies by year. So it's a good idea to repartition the dataset as you're doing your initial manipulations on it, as we did above. But it did take a while to do that because of all the transferring of data across nodes.
 
@@ -542,7 +543,7 @@ Note that the median calculation is another map function not a reduce, because i
 
 ### 2.4.3) Stratifying data and exporting
 
-Now suppose we wanted to create multiple datasets, one per stratum. This does not fit all that well into the MapReduce/HDFS paradigm. We could loop through the unique values of the stratifying variable using `filter()` and `saveAsTextFile()` as seen above. There are not really any better ways to do this, but if we first sort by key, that can improve our speed. Here I'll stratify by departure airport.
+Now suppose we wanted to create multiple datasets, one per stratum. This does not fit all that well into the MapReduce/HDFS paradigm. We could loop through the unique values of the stratifying variable using `filter()` and `saveAsTextFile()` as seen above. There are not really any better ways to do this. In previous tries, I used `sortByKey()` first and that improved speed but I've been running into errors recently when doing that, with Spark losing access to some of the worker tasks (executors). Here I'll stratify by departure airport.
 
 ```{r, engine='python'}
 def createKeyValue(line):
@@ -550,19 +551,19 @@ def createKeyValue(line):
     keyVal = vals[16]
     return(keyVal, line)
 
-output = lines.map(createKeyValue).sortByKey().cache()
-keyInfo = output.countByKey()
-keys = keyInfo.keys
+keyedLines = lines.map(createKeyValue).cache()
+
+keys = keyedLines.countByKey().keys()
 
 for curkey in keys:
     const = sc.broadcast(curkey)
     fn = '/data/' + curkey
-    output.filter(lambda x: curkey == x[0]).map(lambda x: x[1]).repartition(1).saveAsTextFile(fn)
+    keyedLines.filter(lambda x: curkey == x[0]).map(lambda x: x[1]).repartition(1).saveAsTextFile(fn)
 ```
 
 Note the use of the `broadcast()` method to send out the value of a variable to all the workers.
 
-The `repartition(1)` ensures that the entire RDD for a given key is on a single partition so that we get a single file for each stratum instead of having each stratum split into pieces across the different nodes hosting the HDFS. The mapper simply pulls out the value for each key-value pair. 
+The `repartition(1)` ensures that the entire RDD for a given key is on a single partition so that we get a single file for each stratum instead of having each stratum split into pieces across the different nodes hosting the HDFS. The mapper simply pulls out the value for each key-value pair, discarding the key. 
 
 
 ## 2.5) Doing simulation via a simple MapReduce calculation
@@ -576,55 +577,26 @@ import numpy.random as rand
 from operator import add
 
 samples_per_slice = 1000000
-num_slices = 100
+num_cores = 24
+num_slices = num_cores * 20
 
 def sample(p):
     rand.seed(p)
     x, y = rand.random(samples_per_slice), rand.random(samples_per_slice)
     return sum(x*x + y*y < 1)
 
-count = sc.parallelize(xrange(0, num_slices), num_slices).map(sample).reduce(lambda a, b: a + b)
+count = sc.parallelize(xrange(0, num_slices), num_slices).map(sample).reduce(add)
 print "Pi is roughly %f" % (4.0 * count / (num_slices*samples_per_slice))
 ```
 
-Let's piece that apart. The mapping step here uses `sample()`, which takes an identifier, $p$, and compute a large number of random vectors, returning the number of vectors whose length is less than one.  So `sample` is the map function
+Let's piece that apart. The `parallelize()` call basically takes the numbers {0,1,2,...,num_slices-1} and treats them as the input "dataset". These are the initial units and then the transformation (the mapper) is to do the random number generation and compute the partial sum. The second argument to `parallelize()` indicates how many partitions to create, so this will correspond to the number of tasks that will be carried out in a subsequent map step.
 
-The reduction step is to combine all those sums into a single sum (`count`) that can then be used to estimate $\pi$. Notice that the reduction function is just addition. The reduction operator needs to be associative and communative - it can't matter what order the values are passed to the reducer or which values are grouped together for reduction. 
-
-A few comments here. First we could have sampled a single random vector, thereby calling parallelize across numslices*samples_per_slice, with one task per {x,y} pair. But it's much more computationally efficient to do a larger chunk of calculation in each process since there is overhead in running each process. But we want enough processes to make use of all the processors collectively in our Spark cluster and probably rather more than that in case some processors do the computation more slowly than others. Also, if the computation involved a large amount of memory we wouldn't want to exceed the physical RAM available to the processes that work simultaneously on a node. 
-
-However, we also don't want too many tasks. For example, if we try to have as many as 50 million parallel tasks, Spark will hang. This is because each task involves some overhead and with that many tasks the overhead is too great [get more details XXX].
-
-The parallelize call basically takes the numbers 0,1,2,...,num_slices and treats them as the input "dataset". These are the initial units and then the transformation (the mapper) is to do the RNG and compute that sum. 
-
-mapped function is called once per value, grouped by slices, so 
-xrange(0,10), 2
-has 2 groups of 5
+A few comments here. First we could have sampled a single random vector, thereby calling `parallelize()` across numslices*samples_per_slice, with one task per {x,y} pair. But it's much more computationally efficient to do a larger chunk of calculation in each process since there is overhead in running each process. But we want enough processes to make use of all the processors collectively in our Spark cluster and probably rather more than that in case some processors do the computation more slowly than others. Also, if the computation involved a large amount of memory we wouldn't want to exceed the physical RAM available to the processes that work simultaneously on a node. However, we also don't want too many tasks. For example, if we try to have as many as 50 million parallel tasks, Spark will hang. Somehow the overhead in creating that many tasks is too great, though I need to look further for a complete explanation.
 
 
-Note that as the computation runs, we see each process of running sample() is assigned to a node and starts and finishes.
+## 2.6) Random number generation in parallel
 
-```{r, eval=FALSE}
-14/10/09 00:30:42 INFO scheduler.TaskSetManager: Starting task 6.0 in stage 0.0 (TID 6, ip-10-252-175-7.us-west-2.compute.internal, PROCESS_LOCAL, 1113 bytes)
-14/10/09 00:30:42 INFO scheduler.TaskSetManager: Finished task 1.0 in stage 0.0 (TID 1) in 2547 ms on ip-10-252-175-7.us-west-2.compute.internal (1/100)
-14/10/09 00:30:42 INFO scheduler.TaskSetManager: Starting task 7.0 in stage 0.0 (TID 7, ip-10-252-175-7.us-west-2.compute.internal, PROCESS_LOCAL, 1113 bytes)
-14/10/09 00:30:42 INFO scheduler.TaskSetManager: Finished task 0.0 in stage 0.0 (TID 0) in 2600 ms on ip-10-252-175-7.us-west-2.compute.internal (2/100)
-14/10/09 00:30:42 INFO scheduler.TaskSetManager: Starting task 8.0 in stage 0.0 (TID 8, ip-10-252-152-121.us-west-2.compute.internal, PROCESS_LOCAL, 1113 bytes)
-```
-
-As before, we start with the SparkContext object and successively apply methods to objects, since this is in an OOP paradigm. Once we've done the sc.parallelize(xrange(0, num_slices), num_slices) step, we have a Spark RDD. We could have done the computation in steps. E.g.,
-
-```{r, eval=FALSE, engine='python'}
-vals = sc.parallelize(xrange(0, num_slices), num_slices).cache()
-sumVals = vals.map(sample).cache()
-count = sumVals.reduce(lambda a, b: a + b)
-```
-
-I've added the .cache() method here so that values are kept in memory for faster processing in subsequent steps.
-
-## 2.6) RNG
-
-A basic approach to deal with parallel random number generation (RNG) is to set  the seed based on the task id, e.g., passed in via `parallelize()` above.
+A basic approach to deal with parallel random number generation (RNG) is to set  the seed based on the task id, e.g., passed in via `parallelize()` above.  This doesn't guarantee that the random number streams for the different tasks will not overlap, but it should be unlikely. Unfortunately Python does not provide the L'Ecuyer algorithm, or other algorithms to ensure non-overlapping streams, unlike R and Matlab.
 
 ## 2.7) Using PySpark in batch (non-interactive mode)
 
@@ -667,7 +639,7 @@ spark-submit piCalc.py 100000000 1000
 
 ## 3.1) Regression example with sufficient statistics
 
-Suppose we wanted to run a regression with very many observations, `n`, but relatively few predictors, `p`. For our purposes here, let's assume $p < 5000$ so that $X\topX$ takes up only about 200 Mb. In this case we can compute the sufficient statistics, $X\topX$  and $X\top Y$ using MapReduce and return them to the master for the final calculation.
+Suppose we wanted to run a regression with very many observations, `n`, but relatively few predictors, `p`. For our purposes here, let's assume $p < 5000$ so that $X^\top X$ takes up only about 200 Mb. In this case we can compute the sufficient statistics, $X^\top X$  and $X^\top Y$ using MapReduce and return them to the master for the final calculation.
 
 The basic calculation we are doing is $\sum_{i=1}^n x_i x_i^\top$ and $\sum_{i=1}^n x_i y_i$.
 
@@ -708,7 +680,7 @@ That calculation of the sufficient statistics applied the linear algebra row by 
 
 Here we use `mapPartitions()` to apply a map to an entire partition - the `readPointBatch()` function iterates through the observations in the partition and constructs the $X$ matrix before then doing the crossproduct.
 
-In contrast to the approach above, our reduction is now done over the $K$ matrices, one per partition: $\sum_k=1^K X_k^\top X_k$ and $\sum_{k=1}^K X_k^\top y_k$.
+In contrast to the approach above, our reduction is now done over the $K$ matrices, one per partition: $\sum_{k=1}^K X_k^\top X_k$ and $\sum_{k=1}^K X_k^\top y_k$.
 
 ```{r, eval=FALSE}
 def readPointBatch(iterator):
@@ -730,6 +702,7 @@ def readPointBatch(iterator):
 
 summStats = lines.mapPartitions(readPointBatch).reduce(add)
 mles = np.linalg.solve(summStats[0:P,0:P], summStats[0:P,P])
+```
 
 XXXX - why need list of matrix
 
@@ -743,7 +716,7 @@ We'll precompute the denominator values in a MapReduce step. Our coordinate desc
 
 Note that for efficiency we'll use the mapPartitions() version of this algorithm.
 
-```
+```{r, eval=FALSE}
 P=8
 const3 = sc.broadcast(P)
 

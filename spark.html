@@ -304,7 +304,7 @@ Done!
 <pre><code class="bash">screen -x -RR
 </code></pre>
 
-<p>Once on the master, the addresses of the slave nodes are given in <code>/root/ephemeral-hdfs/conf/slaves</code>. You can choose one of them and ssh to it using the address. Then tools such as <code>top</code> will allow you to see what is going on on the machine. If you want to see what is stored in the HDFS on a given slave you can look in XXXX.</p>
+<p>Once on the master, the addresses of the slave nodes are given in <code>/root/ephemeral-hdfs/conf/slaves</code>. You can choose one of them and ssh to it using the address. Then tools such as <code>top</code> will allow you to see what is going on on the machine. </p>
 
 <p>Spark provides graphical interfaces that allow you to view the status of the system. Open a browser on your local machine. You&#39;ll need the IP address (I&#39;ll call this <code>&lt;master_url&gt;</code> below) stored in <code>/root/ephemeral-hdfs/conf/masters</code> on the master node.  Here are the web interfaces you might take a look at:</p>
 
@@ -343,6 +343,13 @@ hadoop fs -ls /data/airline
 
 <p>Note that the commands to interact with the HDFS are similar to UNIX commands (<code>mkdir</code>, <code>ls</code>, etc.) but they must follow the <code>hadoop fs -</code> syntax.</p>
 
+<p>Note that in general you want your dataset to be split into multiple chunks but not so many that each chunk is tiny (HDFS has trouble when there are millions of files &ndash; see <a href="http://blog.cloudera.com/blog/2009/02/the-small-files-problem/">this explanation</a>, nor so few that the dataset can&#39;t be distributed across the nodes of the distributed file system or cannot be distributed roughly equally in size across the nodes. However, in terms of the latter issues, one can &ldquo;repartition&rdquo; the data in Spark.  </p>
+
+<p>If you&#39;ve done some operations and created a dataset (called <em>airline-sfo</em> here) on the HDFS that you want to transfer back to the master node, you can do the following. Note that this may give you back a dataset broken into pieces (one per Spark partition) so you may need to use UNIX tools to combine into one file.</p>
+
+<pre><code class="bash">hadoop fs -copyToLocal /data/airline-sfo /mnt/airline-sfo
+</code></pre>
+
 <h4>Copying directly from Amazon&#39;s S3</h4>
 
 <p>If the files are stored on Amazon&#39;s S3, you can copy directly onto the HDFS. Here&#39;s how, using the Google ngrams dataset as an example. Note that we need Hadoop&#39;s MapReduce processes running to do this distributed copy operation and Spark does not start these by default. (For doing MapReduce within Spark, we do NOT need to do this.)</p>
@@ -355,13 +362,6 @@ hadoop distcp -D fs.s3n.awsAccessKeyId=&quot;&lt;AWS_ACCESS_KEY_ID&gt;&quot; -D 
 </code></pre>
 
 <p>You&#39;ll need to use your AWS account information in place of the <code>&lt;AWS_ACCESS_KEY_ID&gt;</code> and <code>&lt;AWS_SECRET_ACCESS_KEY&gt;</code> strings here. Also check to see whether you need &ldquo;s3&rdquo; or &ldquo;s3n&rdquo; for the dataset you are interested in. Also, you may want to see if the dataset is stored in a particular AWS region as this may incur additional charges to transfer across regions. If so you may want to start up your cluster in the region in which the data reside. </p>
-
-<p>Note that in general you want your dataset to be split into multiple chunks but not so many that each chunk is tiny (HDFS has trouble when there are millions of files &ndash; see <a href="http://blog.cloudera.com/blog/2009/02/the-small-files-problem/">this explanation</a>, nor so few that the dataset can&#39;t be distributed across the nodes of the distributed file system or cannot be distributed roughly equally in size across the nodes. However, in terms of the latter issues, one can &ldquo;repartition&rdquo; the data in Spark.  </p>
-
-<p>If you&#39;ve done some operations and created a dataset (called <em>airline-sfo</em> here) on the HDFS that you want to transfer back to the master node, you can do the following. Note that this may give you back a dataset broken into pieces (one per Spark partition) so you may need to use UNIX tools to combine into one file.</p>
-
-<pre><code class="bash">hadoop fs -copyToLocal /data/airline-sfo /mnt/airline-sfo
-</code></pre>
 
 <h1>2) Using Spark</h1>
 
@@ -584,7 +584,7 @@ twoKeyCounts = keyValues.reduceByKey(add).take(2)
 
 <p>The number of chunks your dataset is broken into can greatly impact computational efficiency. When a map function is applied to the RDD, the work is broken into one task per partition. </p>
 
-<p>For load-balancing you&#39;ll want at least as many partitions as total computational cores in your cluster and probably rather more partitions. </p>
+<p>For load-balancing you&#39;ll want at least as many partitions as total computational cores in your cluster and probably rather more partitions. The Spark documentation suggests 2-4 partitions (which they also seem to call <em>slices</em>) per CPU. Often there are 100-10,000 partitions. Another rule of thumb is that tasks should take at least 100 ms. If less than that, you may want to repartition to have fewer partitions.</p>
 
 <p>As an example that we&#39;ve already seen, the original airline dataset is in 22 partitions, one per input CSV file, and those partitions are different sizes because the data size varies by year. So it&#39;s a good idea to repartition the dataset as you&#39;re doing your initial manipulations on it, as we did above. But it did take a while to do that because of all the transferring of data across nodes.</p>
 
@@ -630,7 +630,8 @@ twoKeyCounts = keyValues.reduceByKey(add).take(2)
 def reducer( (dep1, valid1), (dep2, valid2) ):
     return( (dep1 + dep2), (valid1 + valid2) )
 
-tmp = lines.map(mapper).reduceByKey(reducer)
+mappedLines = lines.map(mapper).cache()
+tmp = mappedLines.reduceByKey(reducer)
 tmp
 # PythonRDD[11] at RDD at PythonRDD.scala:43
 results = tmp.collect()
@@ -661,35 +662,38 @@ means[0:3]
     else:
         return((input[0], -9999))
 
-output = lines.map(mapper).groupByKey().cache()
+output = mappedLines.groupByKey()
 output.count()
+# 186116
 medianResults = output.map(medianFun).collect()
+medianResults[0:3]
+# [(u&#39;EA-11-ATL-DEN&#39;, 0.0), (u&#39;NW-11-MSP-SDF&#39;, -3.0), (u&#39;DH-8-HPN-ORD&#39;, -7.0)]
 </code></pre>
 
 <p>Note that the median calculation is another map function not a reduce, because it&#39;s just a 1-1 transformation of the RDD that is returned by <code>groupByKey()</code>. But of course the size of the value for each key is much larger before the application of the <code>medianFun()</code> map step</p>
 
 <h3>2.4.3) Stratifying data and exporting</h3>
 
-<p>Now suppose we wanted to create multiple datasets, one per stratum. This does not fit all that well into the MapReduce/HDFS paradigm. We could loop through the unique values of the stratifying variable using <code>filter()</code> and <code>saveAsTextFile()</code> as seen above. There are not really any better ways to do this, but if we first sort by key, that can improve our speed. Here I&#39;ll stratify by departure airport.</p>
+<p>Now suppose we wanted to create multiple datasets, one per stratum. This does not fit all that well into the MapReduce/HDFS paradigm. We could loop through the unique values of the stratifying variable using <code>filter()</code> and <code>saveAsTextFile()</code> as seen above. There are not really any better ways to do this. In previous tries, I used <code>sortByKey()</code> first and that improved speed but I&#39;ve been running into errors recently when doing that, with Spark losing access to some of the worker tasks (executors). Here I&#39;ll stratify by departure airport.</p>
 
 <pre><code class="python">def createKeyValue(line):
     vals = line.split(&#39;,&#39;)
     keyVal = vals[16]
     return(keyVal, line)
 
-output = lines.map(createKeyValue).sortByKey().cache()
-keyInfo = output.countByKey()
-keys = keyInfo.keys() # could I do output.keys()?
+keyedLines = lines.map(createKeyValue).cache()
+
+keys = keyedLines.countByKey().keys()
 
 for curkey in keys:
     const = sc.broadcast(curkey)
     fn = &#39;/data/&#39; + curkey
-    output.filter(lambda x: curkey == x[0]).map(lambda x: x[1]).repartition(1).saveAsTextFile(fn)
+    keyedLines.filter(lambda x: curkey == x[0]).map(lambda x: x[1]).repartition(1).saveAsTextFile(fn)
 </code></pre>
 
 <p>Note the use of the <code>broadcast()</code> method to send out the value of a variable to all the workers.</p>
 
-<p>The <code>repartition(1)</code> ensures that the entire RDD for a given key is on a single partition so that we get a single file for each stratum instead of having each stratum split into pieces across the different nodes hosting the HDFS. The mapper simply pulls out the value for each key-value pair. </p>
+<p>The <code>repartition(1)</code> ensures that the entire RDD for a given key is on a single partition so that we get a single file for each stratum instead of having each stratum split into pieces across the different nodes hosting the HDFS. The mapper simply pulls out the value for each key-value pair, discarding the key. </p>
 
 <h2>2.5) Doing simulation via a simple MapReduce calculation</h2>
 
@@ -701,52 +705,25 @@ for curkey in keys:
 from operator import add
 
 samples_per_slice = 1000000
-num_slices = 100
+num_cores = 24
+num_slices = num_cores * 20
 
 def sample(p):
     rand.seed(p)
     x, y = rand.random(samples_per_slice), rand.random(samples_per_slice)
     return sum(x*x + y*y &lt; 1)
 
-count = sc.parallelize(xrange(0, num_slices), num_slices).map(sample).reduce(lambda a, b: a + b)
+count = sc.parallelize(xrange(0, num_slices), num_slices).map(sample).reduce(add)
 print &quot;Pi is roughly %f&quot; % (4.0 * count / (num_slices*samples_per_slice))
 </code></pre>
 
-<p>Let&#39;s piece that apart. The mapping step here uses <code>sample()</code>, which takes an identifier, \(p\), and compute a large number of random vectors, returning the number of vectors whose length is less than one.  So <code>sample</code> is the map function</p>
+<p>Let&#39;s piece that apart. The <code>parallelize()</code> call basically takes the numbers {0,1,2,&hellip;,num_slices-1} and treats them as the input &ldquo;dataset&rdquo;. These are the initial units and then the transformation (the mapper) is to do the random number generation and compute the partial sum. The second argument to <code>parallelize()</code> indicates how many partitions to create, so this will correspond to the number of tasks that will be carried out in a subsequent map step.</p>
 
-<p>The reduction step is to combine all those sums into a single sum (<code>count</code>) that can then be used to estimate \(\pi\). Notice that the reduction function is just addition. The reduction operator needs to be associative and communative - it can&#39;t matter what order the values are passed to the reducer or which values are grouped together for reduction. </p>
+<p>A few comments here. First we could have sampled a single random vector, thereby calling <code>parallelize()</code> across numslices*samples_per_slice, with one task per {x,y} pair. But it&#39;s much more computationally efficient to do a larger chunk of calculation in each process since there is overhead in running each process. But we want enough processes to make use of all the processors collectively in our Spark cluster and probably rather more than that in case some processors do the computation more slowly than others. Also, if the computation involved a large amount of memory we wouldn&#39;t want to exceed the physical RAM available to the processes that work simultaneously on a node. However, we also don&#39;t want too many tasks. For example, if we try to have as many as 50 million parallel tasks, Spark will hang. Somehow the overhead in creating that many tasks is too great, though I need to look further for a complete explanation.</p>
 
-<p>A few comments here. First we could have sampled a single random vector, thereby calling parallelize across numslices*samples_per_slice, with one task per {x,y} pair. But it&#39;s much more computationally efficient to do a larger chunk of calculation in each process since there is overhead in running each process. But we want enough processes to make use of all the processors collectively in our Spark cluster and probably rather more than that in case some processors do the computation more slowly than others. Also, if the computation involved a large amount of memory we wouldn&#39;t want to exceed the physical RAM available to the processes that work simultaneously on a node. </p>
+<h2>2.6) Random number generation in parallel</h2>
 
-<p>However, we also don&#39;t want too many tasks. For example, if we try to have as many as 50 million parallel tasks, Spark will hang. This is because each task involves some overhead and with that many tasks the overhead is too great [get more details XXX].</p>
-
-<p>The parallelize call basically takes the numbers 0,1,2,&hellip;,num_slices and treats them as the input &ldquo;dataset&rdquo;. These are the initial units and then the transformation (the mapper) is to do the RNG and compute that sum. </p>
-
-<p>mapped function is called once per value, grouped by slices, so 
-xrange(0,10), 2
-has 2 groups of 5</p>
-
-<p>Note that as the computation runs, we see each process of running sample() is assigned to a node and starts and finishes.</p>
-
-<pre><code class="python">14/10/09 00:30:42 INFO scheduler.TaskSetManager: Starting task 6.0 in stage 0.0 (TID 6, ip-10-252-175-7.us-west-2.compute.internal, PROCESS_LOCAL, 1113 bytes)
-14/10/09 00:30:42 INFO scheduler.TaskSetManager: Finished task 1.0 in stage 0.0 (TID 1) in 2547 ms on ip-10-252-175-7.us-west-2.compute.internal (1/100)
-14/10/09 00:30:42 INFO scheduler.TaskSetManager: Starting task 7.0 in stage 0.0 (TID 7, ip-10-252-175-7.us-west-2.compute.internal, PROCESS_LOCAL, 1113 bytes)
-14/10/09 00:30:42 INFO scheduler.TaskSetManager: Finished task 0.0 in stage 0.0 (TID 0) in 2600 ms on ip-10-252-175-7.us-west-2.compute.internal (2/100)
-14/10/09 00:30:42 INFO scheduler.TaskSetManager: Starting task 8.0 in stage 0.0 (TID 8, ip-10-252-152-121.us-west-2.compute.internal, PROCESS_LOCAL, 1113 bytes)
-</code></pre>
-
-<p>As before, we start with the SparkContext object and successively apply methods to objects, since this is in an OOP paradigm. Once we&#39;ve done the sc.parallelize(xrange(0, num_slices), num_slices) step, we have a Spark RDD. We could have done the computation in steps. E.g.,</p>
-
-<pre><code class="python">vals = sc.parallelize(xrange(0, num_slices), num_slices).cache()
-sumVals = vals.map(sample).cache()
-count = sumVals.reduce(lambda a, b: a + b)
-</code></pre>
-
-<p>I&#39;ve added the .cache() method here so that values are kept in memory for faster processing in subsequent steps.</p>
-
-<h2>2.6) RNG</h2>
-
-<p>A basic approach to deal with parallel random number generation (RNG) is to set  the seed based on the task id, e.g., passed in via <code>parallelize()</code> above.</p>
+<p>A basic approach to deal with parallel random number generation (RNG) is to set  the seed based on the task id, e.g., passed in via <code>parallelize()</code> above.  This doesn&#39;t guarantee that the random number streams for the different tasks will not overlap, but it should be unlikely. Unfortunately Python does not provide the L&#39;Ecuyer algorithm, or other algorithms to ensure non-overlapping streams, unlike R and Matlab.</p>
 
 <h2>2.7) Using PySpark in batch (non-interactive mode)</h2>
 
@@ -789,7 +766,7 @@ spark-submit piCalc.py 100000000 1000
 
 <h2>3.1) Regression example with sufficient statistics</h2>
 
-<p>Suppose we wanted to run a regression with very many observations, <code>n</code>, but relatively few predictors, <code>p</code>. For our purposes here, let&#39;s assume \(p < 5000\) so that \(X\topX\) takes up only about 200 Mb. In this case we can compute the sufficient statistics, \(X\topX\)  and \(X\top Y\) using MapReduce and return them to the master for the final calculation.</p>
+<p>Suppose we wanted to run a regression with very many observations, <code>n</code>, but relatively few predictors, <code>p</code>. For our purposes here, let&#39;s assume \(p < 5000\) so that \(X^\top X\) takes up only about 200 Mb. In this case we can compute the sufficient statistics, \(X^\top X\)  and \(X^\top Y\) using MapReduce and return them to the master for the final calculation.</p>
 
 <p>The basic calculation we are doing is \(\sum_{i=1}^n x_i x_i^\top\) and \(\sum_{i=1}^n x_i y_i\).</p>
 
@@ -828,7 +805,7 @@ mles = np.linalg.solve(suffStats[0:P,0:P], suffStats[0:P,P])
 
 <p>Here we use <code>mapPartitions()</code> to apply a map to an entire partition - the <code>readPointBatch()</code> function iterates through the observations in the partition and constructs the \(X\) matrix before then doing the crossproduct.</p>
 
-<p>In contrast to the approach above, our reduction is now done over the \(K\) matrices, one per partition: \(\sum_k=1^K X_k^\top X_k\) and \(\sum_{k=1}^K X_k^\top y_k\).</p>
+<p>In contrast to the approach above, our reduction is now done over the \(K\) matrices, one per partition: \(\sum_{k=1}^K X_k^\top X_k\) and \(\sum_{k=1}^K X_k^\top y_k\).</p>
 
 <pre><code class="python">def readPointBatch(iterator):
     strs = list(iterator)
@@ -849,25 +826,24 @@ mles = np.linalg.solve(suffStats[0:P,0:P], suffStats[0:P,P])
 
 summStats = lines.mapPartitions(readPointBatch).reduce(add)
 mles = np.linalg.solve(summStats[0:P,0:P], summStats[0:P,P])
-
-XXXX - why need list of matrix
-
-## 3.2) Coordinate descent for linear regression
-
-The strategy above makes a lot of sense but breaks down as $P$ gets large. We might consider coordinate descent, iterating through the individual regression coefficients. Of course this would probably be quite slow for large $P$, but it&#39;s worthwhile to illustrate and we&#39;ll see the use of coordinate descent for lasso problems in the next section.
-
-For linear regression, the optimization for a single coefficient, holding the others constant, can be done in closed form. $\hat{\beta}_{k} = \frac{\sum_{i=1}^n r_i y_i} {\sum_{i=1}^n x_{k,i}^2 }$ where $r_i = y_i - \sum_{j \ne k} x_{j,i}\beta_j$.
-
-We&#39;ll precompute the denominator values in a MapReduce step. Our coordinate descent is then an iterative procedure with and inner loop that loops over the coefficients.
-
-Note that for efficiency we&#39;ll use the mapPartitions() version of this algorithm.
-
 </code></pre>
 
-<p>P=8
-const3 = sc.broadcast(P)</p>
+<p>XXXX - why need list of matrix</p>
 
-<p>def readPointBatch(iterator):
+<h2>3.2) Coordinate descent for linear regression</h2>
+
+<p>The strategy above makes a lot of sense but breaks down as \(P\) gets large. We might consider coordinate descent, iterating through the individual regression coefficients. Of course this would probably be quite slow for large \(P\), but it&#39;s worthwhile to illustrate and we&#39;ll see the use of coordinate descent for lasso problems in the next section.</p>
+
+<p>For linear regression, the optimization for a single coefficient, holding the others constant, can be done in closed form. \(\hat{\beta}_{k} = \frac{\sum_{i=1}^n r_i y_i} {\sum_{i=1}^n x_{k,i}^2 }\) where \(r_i = y_i - \sum_{j \ne k} x_{j,i}\beta_j\).</p>
+
+<p>We&#39;ll precompute the denominator values in a MapReduce step. Our coordinate descent is then an iterative procedure with and inner loop that loops over the coefficients.</p>
+
+<p>Note that for efficiency we&#39;ll use the mapPartitions() version of this algorithm.</p>
+
+<pre><code class="python">P=8
+const3 = sc.broadcast(P)
+
+def readPointBatch(iterator):
     strs = list(iterator)
     matrix = np.zeros((len(strs), P+1))
     print(len(strs))
@@ -882,43 +858,34 @@ const3 = sc.broadcast(P)</p>
         if(dayOfWeek &gt; 1):
             xVec[dayOfWeek] = 1.0
         matrix[i] = xVec
-    return [matrix]</p>
+    return [matrix]
 
-<p>batches = lines.mapPartitions(readPointBatch).cache()</p>
+batches = lines.mapPartitions(readPointBatch).cache()
 
-<p>def denomSumSqBatch(mat):</p>
+def denomSumSqBatch(mat):
+# compute denominator of update: sum of squared predictor
+    return((mat*mat).sum(axis=0))
 
-<h1>compute denominator of update: sum of squared predictor</h1>
+def getNumBatch(mat):
+# compute numerator of update: covariance of residual and predictor
+    beta[p] = 0
+    sumXb = mat[:, 0:P].dot(beta)
+    return(sum((mat[:,P] - sumXb)*mat[:,p]))
 
-<pre><code>return((mat*mat).sum(axis=0))
-</code></pre>
+def vecAdd(val1, val2):
+    return[val1[i]+val2[i] for i in xrange(P+1)]
+# this is faster than np vec add or looping to add val2[i] to val1[i]
 
-<p>def getNumBatch(mat):</p>
+# compute denominator of update 
+sumx2 = batches.map(denomSumSqBatch).reduce(add)
 
-<h1>compute numerator of update: covariance of residual and predictor</h1>
-
-<pre><code>beta[p] = 0
-sumXb = mat[:, 0:P].dot(beta)
-return(sum((mat[:,P] - sumXb)*mat[:,p]))
-</code></pre>
-
-<p>def vecAdd(val1, val2):
-    return[val1[i]+val2[i] for i in xrange(P+1)]</p>
-
-<h1>this is faster than np vec add or looping to add val2[i] to val1[i]</h1>
-
-<h1>compute denominator of update</h1>
-
-<p>sumx2 = batches.map(denomSumSqBatch).reduce(add)</p>
-
-<h1>initialize values</h1>
-
-<p>beta = np.array([0.0] * P)
+# initialize values
+beta = np.array([0.0] * P)
 p = 0
 oldBeta = beta.copy()
-it = 0</p>
+it = 0
 
-<p>#while crit &gt; tol and its &lt; maxIts:
+#while crit &gt; tol and its &lt; maxIts:
 for it in range(1,4):
     for p in xrange(P):
         # distribute current beta and current coordinate
@@ -926,25 +893,23 @@ for it in range(1,4):
         bc2 = sc.broadcast(p)
         sumNum = batches.map(getNumBatch).reduce(add)
         # update coordinate:
-        beta[p] = sumNum / sumx2[p]<br/>
+        beta[p] = sumNum / sumx2[p]   
     crit = sum(abs(beta - oldBeta))
     oldBeta = beta.copy()
     # interim reporting of estimates:
-    print(&ldquo;-&rdquo;*100)
+    print(&quot;-&quot;*100)
     print(beta)
     print(crit)
-    print(&ldquo;-&rdquo;*100)</p>
+    print(&quot;-&quot;*100)
+</code></pre>
 
-<pre><code>
-## 3.3) Lasso via coordinate descent
+<h2>3.3) Lasso via coordinate descent</h2>
 
-A standard approach to fitting the Lasso is coordinate descent, as done in R&#39;s glmnet package, documented here in [Friedman et al.](url).
+<p>A standard approach to fitting the Lasso is coordinate descent, as done in R&#39;s glmnet package, documented here in <a href="url">Friedman et al.</a>.</p>
 
-To test out my code, I&#39;m going to generate a large simulated dataset, with 10 non-zero coefficients of varying size and 90 zero coefficients. The individual coefficient updates are similar to the coordinate descent for linear regression, involving covariances between residuals and predictor, but with thresholding. For the example here, I just do this with a single value of the penalty parameter, $\lambda$, but one could readily extend this to compute the solution path across different values of $\lambda$, using the idea of warm starts, in which the optimization for the next value of the penalty starts at the estimates found for the current value of the penalty. 
+<p>To test out my code, I&#39;m going to generate a large simulated dataset, with 10 non-zero coefficients of varying size and 90 zero coefficients. The individual coefficient updates are similar to the coordinate descent for linear regression, involving covariances between residuals and predictor, but with thresholding. For the example here, I just do this with a single value of the penalty parameter, \(\lambda\), but one could readily extend this to compute the solution path across different values of \(\lambda\), using the idea of warm starts, in which the optimization for the next value of the penalty starts at the estimates found for the current value of the penalty. </p>
 
-
-```python
-# put in lasso code
+<pre><code class="python"># put in lasso code
 </code></pre>
 
 <p>Note that my implementation here is the somewhat simplistic X algorithm. The Y algorithm presented in Friedman et al. makes use of the sparsity of the coefficient vector to achieve computational speedup.</p>
