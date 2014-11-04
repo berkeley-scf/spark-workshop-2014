@@ -174,7 +174,7 @@ hr {
 
 <p>Presented: November 7 and 14, 2014</p>
 
-<p>Last Revised: October, 2014</p>
+<p>Last Revised: November 7, 2014</p>
 
 <h1>0) This Tutorial</h1>
 
@@ -189,13 +189,20 @@ hr {
 
 <p>To create this HTML document, simply compile the corresponding R Markdown file in R:</p>
 
-<pre><code class="bash">#pandoc --number-sections spark.md -o spark.html
-Rscript -e &quot;library(knitr); knit2html(&#39;spark.Rmd&#39;)&quot;
-#Rscript -e &quot;library(knitr); knit(&#39;spark.Rmd&#39;)&quot;
-#pandoc --mathjax --number-sections spark.md -o spark.html
+<pre><code class="bash">Rscript -e &quot;library(knitr); knit2html(&#39;spark.Rmd&#39;)&quot;
 </code></pre>
 
+<!--
+#pandoc --number-sections spark.md -o spark.html
+#Rscript -e "library(knitr); knit('spark.Rmd')"
+#pandoc --mathjax --number-sections spark.md -o spark.html
+-->
+
 <p>To get the airline dataset we&#39;ll be using as a running example, you can download from <a href="http://www.stat.berkeley.edu/share/paciorek/1987-2008.csvs.tgz">this URL</a> or as individual .bz2 files from <code>http://www.stat.berkeley.edu/share/paciorek/{1987,...,2008}.csv.bz2</code>. The demo code later in this document will do the downloading automatically.</p>
+
+<p>There is a version of Spark for R (SparkR, see notes at the end of this document), so if you get the big picture from this but don&#39;t follow all the Python syntax, you should be able to get up to speed on Spark with R fairly quickly.</p>
+
+<p>Also, note that on Nov. 13 (next Thursday) there will be a dry run of the AMPCamp talks on Spark, so look at the details at the end of this document if you want to hear more about Spark from the Spark pros.</p>
 
 <p>I&#39;m using the R extension of Markdown for ease of dealing with Latex equations, though it is admittedly a bit strange to use R Markdown for a tutorial that doesn&#39;t involve R. For the most part this could have just been done as a Markdown document.</p>
 
@@ -999,6 +1006,8 @@ for it in range(1,nIts):
 
 <p>Spark Streaming allows you to work with data arriving in an on-line manner. </p>
 
+<p>SparkR provides an R interface. It&#39;s in development on <a href="http://amplab-extras.github.io/SparkR-pkg/">Github</a>.</p>
+
 <h2>4.3) Alternatives to Spark</h2>
 
 <p>Many &ldquo;big data&rdquo; problems will fit on disk (and sometimes even in memory on machines with a lot of memory) on a single machine. If so, you may be better off doing the work on a single machine, potentially parallelizing calculations across multiple cores on that machine. Here are some of the tools that are useful for dealing with large datasets.</p>
@@ -1028,6 +1037,7 @@ But it is also available (although I haven&#39;t used this) in standard Python:
 <ul>
 <li><a href="http://databricks.com/spark-training-resources">Here are some online resources from databricks</a></li>
 <li>AMPLab runs the <a href="http://ampcamp.berkeley.edu/">AmpCamp</a>. The next one is Nov. 20-21, 2014, though it&#39;s expensive if you can&#39;t leverage an invitation through a connection with AMPLab.</li>
+<li>The AMPLab will have  dry runs of the AmpCamp talks that you are welcome to attend and give feedback on. Nov. 13, 10 am - 4 pm in Soda 606. Dry runs for the AmpCamp exercises will be Nov. 17, 4 pm - 7 pm, Soda 405. First come first served.</li>
 </ul>
 
 <h1>5) Homework</h1>

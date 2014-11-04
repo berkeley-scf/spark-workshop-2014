@@ -605,7 +605,8 @@ A basic approach to deal with parallel random number generation (RNG) is to set 
 
 We can also do that calculation as a batch job.
 
-Here's the code in the file piCalc.py
+Here's the code in the file *piCalc.py*:
+
 ```{r, eval=FALSE, engine='python'}
 import sys
 import numpy.random as rand
@@ -615,7 +616,7 @@ if __name__ == "__main__":
     if len(sys.argv) != 2:
         print >> sys.stderr, "Usage: spark-submit piCalc.py <total_samples> <slices>"
         exit(-1)
-    sc = SparkContext() # sys.argv[1], "PythonPi")
+    sc = SparkContext() 
     total_samples = int(sys.argv[1]) if len(sys.argv) > 1 else 1000000
     num_slices = int(sys.argv[2]) if len(sys.argv) > 2 else 2
     samples_per_slice = round(total_samples / num_slices)
@@ -634,9 +635,13 @@ Note that by starting Python via PySpark, the `sc` object is created and availab
 
 And here's how we run it from the UNIX command line on the master node
 ```{r, eval=FALSE}
-# pyspark piCalc.py `cat /root/spark-ec2/cluster-url` 100000000 1000
+
 spark-submit piCalc.py 100000000 1000
 ```
+
+<!--
+# pyspark piCalc.py `cat /root/spark-ec2/cluster-url` 100000000 1000
+>--
 
 # 3) Model fitting with Spark
 
@@ -707,7 +712,8 @@ summStats = lines.mapPartitions(readPointBatch).reduce(add)
 mles = np.linalg.solve(summStats[0:P,0:P], summStats[0:P,P])
 ```
 
-XXXX - why need list of matrix
+It's not entirely clear to me why I needed to return a list with a single matrix from `readPointBatch()` as opposed to simply returning the matrix. 
+XXXX - why need list of matrix - is take(1) giving a list? 
 
 ## 3.2) Coordinate descent for linear regression
 
@@ -715,9 +721,9 @@ The strategy above makes a lot of sense but breaks down as $P$ gets large. We mi
 
 For linear regression, the optimization for a single coefficient, holding the others constant, can be done in closed form. $\hat{\beta}_{k} = \frac{\sum_{i=1}^n r_i y_i} {\sum_{i=1}^n x_{k,i}^2 }$ where $r_i = y_i - \sum_{j \ne k} x_{j,i}\beta_j$.
 
-We'll precompute the denominator values in a MapReduce step. Our coordinate descent is then an iterative procedure with and inner loop that loops over the coefficients.
+We'll precompute the denominator values in a MapReduce step. Our coordinate descent is then an iterative procedure with an inner loop that loops over the coefficients.
 
-Note that for efficiency we'll use the mapPartitions() version of this algorithm.
+Note that for efficiency we'll use the `mapPartitions()` version of this algorithm.
 
 ```{r, eval=FALSE}
 P=8
