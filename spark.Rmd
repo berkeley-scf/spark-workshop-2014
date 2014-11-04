@@ -299,6 +299,10 @@ There are 22 tasks because there are 22 data files. Each task is done as a singl
 
 You should see there are about 123 million observations (rows) in the dataset (the dataset is an *RDD* object). More on RDDs in a bit.
 
+#### What if the data are not one-line-per-row?
+
+You can read in each file as an individual observation using `wholeTextFiles()` and you can use `flatMap()` to convert one row into multiple observations.
+
 #### Reading into Spark from S3
 
 If we wanted to read directly into Spark from S3 (again checking if we need s3 or s3n), we can do something like this, here reading from the berkeley-scf-test S3 bucket. 
@@ -450,6 +454,8 @@ Note also the *sc* object we used for reading from the HDFS was a *SparkContext*
 
 Spark by default will try to manipulate RDDs in memory if they fit in the collective memory of the nodes. You can tell Spark that a given RDD should be kept in memory so that you can quickly access it later by using the `cache()` method. To see the RDDs that are cached in memory, go to `http://<master_url>:4040` and click on the "Storage" tab.
 
+If an RDD won't fit in memory, Spark will recompute it as needed, but this will involve a lot of additional computation. In some (but not all) cases in which there is not enough collective memory you may want it cached on disk. The [Spark programming guide](http://spark.apache.org/docs/latest/programming-guide.html#rdd-persistence) has more information.
+
 ### 2.3.3) Partitions and repartitioning
 
 The number of chunks your dataset is broken into can greatly impact computational efficiency. When a map function is applied to the RDD, the work is broken into one task per partition. 
@@ -464,7 +470,7 @@ MapReduce is a sort of meta-algorithm. If you can write your algorithm/computati
 
 The basic idea is that your computation be written as a one or more iterations over a *Map* step and a *Reduce* step. The map step takes each 'observation' (each unit that can be treated independently) and applies some transformation to it. Think of a mathematical mapping. The reduction step then takes the results and does some sort of aggregation operation that returns a summary measure. Sometimes the mapping step involves computing a key for each unit. The units that share the same key are then collected together and a reduction step may be done for each key value. 
 
-Actually, it's more general than that. We may have multiple map before any reduction or no reduction at all. And the reduction step is really just an aggregation applied to an RDD that produces another RDD. This can be done at any point and there could be multiple reductions. 
+Actually, it's more general than that. We may have multiple map steps before any reduction or no reduction at all. Also `reduceByKey()` returns an RDD, so there could potentially be multiple reductions. 
 
 Reduction functions should be associative and commutative. It shouldn't matter what order the operations are done in or which observations are grouped with which others in order that the reduction can be done in parallel in a simple fashion.
 
@@ -592,7 +598,7 @@ count = sc.parallelize(xrange(0, num_slices), num_slices).map(sample).reduce(add
 print "Pi is roughly %f" % (4.0 * count / (num_slices*samples_per_slice))
 ```
 
-Let's piece that apart. The `parallelize()` call basically takes the numbers {0,1,2,...,num_slices-1} and treats them as the input "dataset". These are the initial units and then the transformation (the mapper) is to do the random number generation and compute the partial sum. The second argument to `parallelize()` indicates how many partitions to create, so this will correspond to the number of tasks that will be carried out in a subsequent map step.
+Let's piece that apart. The `parallelize()` call basically takes the numbers {0,1,2,...,num_slices-1} and treats them as the input "dataset". These are the initial units and then the transformation (the mapper) is to do the random number generation and compute the partial sum. The second argument to `parallelize()` indicates how many partitions to create, so this will correspond to the number of tasks that will be carried out in a subsequent map step. Using `paralllelize()` to create an RDD from an existing Python list is another to create an RDD, in addition to reading data from an external storage system such as the HDFS.
 
 A few comments here. First we could have sampled a single random vector, thereby calling `parallelize()` across numslices*samples_per_slice, with one task per {x,y} pair. But it's much more computationally efficient to do a larger chunk of calculation in each process since there is overhead in running each process. But we want enough processes to make use of all the processors collectively in our Spark cluster and probably rather more than that in case some processors do the computation more slowly than others. Also, if the computation involved a large amount of memory we wouldn't want to exceed the physical RAM available to the processes that work simultaneously on a node. However, we also don't want too many tasks. For example, if we try to have as many as 50 million parallel tasks, Spark will hang. Somehow the overhead in creating that many tasks is too great, though I need to look further for a complete explanation.
 
@@ -613,7 +619,7 @@ import numpy.random as rand
 from operator import add
 from pyspark import SparkContext
 if __name__ == "__main__":
-    if len(sys.argv) != 2:
+    if len(sys.argv) != 3:
         print >> sys.stderr, "Usage: spark-submit piCalc.py <total_samples> <slices>"
         exit(-1)
     sc = SparkContext() 
@@ -631,11 +637,10 @@ if __name__ == "__main__":
 
 ```
 
-Note that by starting Python via PySpark, the `sc` object is created and available to you, but for batch jobs we need to import it ourselves.
+Note that by starting Python via PySpark, the `sc` object is created and available to you, but for batch jobs we need to import *SparkContext* and instantiate the *sc* object ourselves.
 
 And here's how we run it from the UNIX command line on the master node
 ```{r, eval=FALSE}
-
 spark-submit piCalc.py 100000000 1000
 ```
 
@@ -647,7 +652,7 @@ spark-submit piCalc.py 100000000 1000
 
 ## 3.1) Regression example with sufficient statistics
 
-Suppose we wanted to run a regression with very many observations, `n`, but relatively few predictors, `p`. For our purposes here, let's assume $p < 5000$ so that $X^\top X$ takes up only about 200 Mb. In this case we can compute the sufficient statistics, $X^\top X$  and $X^\top Y$ using MapReduce and return them to the master for the final calculation.
+Suppose we wanted to run a regression with very many observations, `n`, but relatively few predictors, `p`. For our purposes here, let's assume $p < 5000$ so that $X^\top X$ takes up at most about 200 Mb. In this case we can compute the sufficient statistics, $X^\top X$  and $X^\top Y$ using MapReduce and return them to the master for the final calculation.
 
 The basic calculation we are doing is $\sum_{i=1}^n x_i x_i^\top$ and $\sum_{i=1}^n x_i y_i$.
 
@@ -661,6 +666,8 @@ def screen(vals):
            float(vals[14]) < 720 and float(vals[14]) > (-30) )
 
 lines = sc.textFile('/data/airline').filter(screen).repartition(192).cache()
+
+P = 8
 
 def crossprod(line):
     P = 8
@@ -679,12 +686,15 @@ def crossprod(line):
 
 suffStats = lines.map(crossprod).reduce(add)
 mles = np.linalg.solve(suffStats[0:P,0:P], suffStats[0:P,P])
+# array([ 6.366239  ,  0.76375807, -0.69956913,  0.39282445,  2.22473943,
+#        2.88670704, -2.42725064, -0.13621746])
+
 ```
 
 
-### 3.1.1) More efficient calculation using `mapPartitions()` 
+### More efficient calculation using `mapPartitions()` 
 
-That calculation of the sufficient statistics applied the linear algebra row by row. A more efficient alternative is to put all the data for a given partition into a matrix and do the linear algebra on the matrix. XXXX - say more about why
+That calculation of the sufficient statistics applied the linear algebra row by row. For the full airline datast it took about 11 minutes. A more efficient alternative is to put all the data for a given partition into a matrix and do the linear algebra on the matrix. The code below takes about 2.5 minutes.
 
 Here we use `mapPartitions()` to apply a map to an entire partition - the `readPointBatch()` function iterates through the observations in the partition and constructs the $X$ matrix before then doing the crossproduct.
 
@@ -712,18 +722,18 @@ summStats = lines.mapPartitions(readPointBatch).reduce(add)
 mles = np.linalg.solve(summStats[0:P,0:P], summStats[0:P,P])
 ```
 
-It's not entirely clear to me why I needed to return a list with a single matrix from `readPointBatch()` as opposed to simply returning the matrix. 
-XXXX - why need list of matrix - is take(1) giving a list? 
+It's not entirely clear to me why I needed to return a list with a single matrix from `readPointBatch()` as opposed to simply returning the matrix, but I expect it's just that PySpark needs each element of the RDD to be a list (or perhaps a tuple instead). 
+
 
 ## 3.2) Coordinate descent for linear regression
 
-The strategy above makes a lot of sense but breaks down as $P$ gets large. We might consider coordinate descent, iterating through the individual regression coefficients. Of course this would probably be quite slow for large $P$, but it's worthwhile to illustrate and we'll see the use of coordinate descent for lasso problems in the next section.
+The strategy above makes a lot of sense but breaks down as $P$ gets large. We might consider coordinate descent, iterating through the individual regression coefficients. Of course this would probably be quite slow for large $P$, but it's worthwhile to illustrate and sets the stage for our use of coordinate descent for lasso problems in the next section.
 
-For linear regression, the optimization for a single coefficient, holding the others constant, can be done in closed form. $\hat{\beta}_{k} = \frac{\sum_{i=1}^n r_i y_i} {\sum_{i=1}^n x_{k,i}^2 }$ where $r_i = y_i - \sum_{j \ne k} x_{j,i}\beta_j$.
+For linear regression, the optimization for a single coefficient, holding the others constant, can be done in closed form: $\hat{\beta}_{k} = \frac{\sum_{i=1}^n r_i y_i} {\sum_{i=1}^n x_{k,i}^2 }$ where $r_i = y_i - \sum_{j \ne k} x_{j,i}\beta_j$.
 
-We'll precompute the denominator values in a MapReduce step. Our coordinate descent is then an iterative procedure with an inner loop that loops over the coefficients.
+We'll precompute the denominator values in a MapReduce step. Our coordinate descent is then an iterative procedure with an inner loop that loops over the coefficients. For simplicity below I just do a fixed number of iterations, but in reality of course we would want a reasonable stopping criterion for the optimization.
 
-Note that for efficiency we'll use the `mapPartitions()` version of this algorithm.
+Note that for efficiency we'll again use the `mapPartitions()` version of this algorithm.
 
 ```{r, eval=FALSE}
 P=8
@@ -746,6 +756,7 @@ def readPointBatch(iterator):
         matrix[i] = xVec
     return [matrix]
 
+# set up the partitions with the submatrices
 batches = lines.mapPartitions(readPointBatch).cache()
 
 def denomSumSqBatch(mat):
@@ -760,19 +771,21 @@ def getNumBatch(mat):
 
 def vecAdd(val1, val2):
     return[val1[i]+val2[i] for i in xrange(P+1)]
-# this is faster than np vec add or looping to add val2[i] to val1[i]
+# this is faster than numpy vec add or looping to add val2[i] to val1[i]
 
 # compute denominator of update 
 sumx2 = batches.map(denomSumSqBatch).reduce(add)
 
-# initialize values
+# initialize coefficient values
 beta = np.array([0.0] * P)
 p = 0
 oldBeta = beta.copy()
 it = 0
 
+# finally.... do the optimization!
+
 #while crit > tol and its < maxIts:
-for it in range(1,4):
+for it in range(1,100):
     for p in xrange(P):
         # distribute current beta and current coordinate
         bc1 = sc.broadcast(beta)
@@ -787,7 +800,15 @@ for it in range(1,4):
     print(beta)
     print(crit)
     print("-"*100)
+
+print beta
+#[ 7.0987348   0.57795465 -1.30359727 -0.21110881  1.6211203   2.28315019
+# -3.02584311 -0.73731912]
 ```
+
+The parameters haven't converged fully but you can see they're headed towards the right values. 
+
+Each update of a coordinate takes about a 7 seconds.
 
 ## 3.3) Lasso via coordinate descent
 
@@ -912,6 +933,7 @@ up-coming updates to LAPACK, ScaLAPACK for linear algebra on distributed memory 
 
 ## 4.4) More resources
 
+  - Most of this workshop is based on the [Spark programming guide](http://spark.apache.org/docs/latest/programming-guide.html).
   - [Here are some online resources from databricks](http://databricks.com/spark-training-resources)
   - AMPLab runs the [AmpCamp](http://ampcamp.berkeley.edu/). The next one is Nov. 20-21, 2014, though it's expensive if you can't leverage an invitation through a connection with AMPLab.
   - The AMPLab will have  dry runs of the AmpCamp talks that you are welcome to attend and give feedback on. Nov. 13, 10 am - 4 pm in Soda 606. Dry runs for the AmpCamp exercises will be Nov. 17, 4 pm - 7 pm, Soda 405. First come first served.
