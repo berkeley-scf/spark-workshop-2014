@@ -778,13 +778,9 @@ if __name__ == &quot;__main__&quot;:
 <pre><code class="python">spark-submit piCalc.py 100000000 1000
 </code></pre>
 
-<p>&lt;!&ndash;</p>
-
-<h1>pyspark piCalc.py <code>cat /root/spark-ec2/cluster-url</code> 100000000 1000</h1>
-
-<blockquote>
-<h2></h2>
-</blockquote>
+<!--
+# pyspark piCalc.py `cat /root/spark-ec2/cluster-url` 100000000 1000
+-->
 
 <h1>3) Model fitting with Spark</h1>
 
@@ -935,24 +931,156 @@ for it in range(1,100):
     print(&quot;-&quot;*100)
 
 print beta
+# after 4 iterations
 #[ 7.0987348   0.57795465 -1.30359727 -0.21110881  1.6211203   2.28315019
 # -3.02584311 -0.73731912]
+# after 100 iterations
+#[ 6.36623919  0.76375807 -0.69956932  0.39282426  2.22473924  2.88670685
+# -2.42725082 -0.13621764]
 </code></pre>
 
-<p>The parameters haven&#39;t converged fully but you can see they&#39;re headed towards the right values. </p>
+<p>The parameters haven&#39;t converged fully after four iterations, but are equal to the MLE by 100 iterations (I didn&#39;t check carefully to see where convergence had been reached, so 100 iterations may be serious overkill).</p>
 
 <p>Each update of a coordinate takes about a 7 seconds.</p>
 
 <h2>3.3) Lasso via coordinate descent</h2>
 
-<p>A standard approach to fitting the Lasso is coordinate descent, as done in R&#39;s glmnet package, documented here in <a href="url">Friedman et al.</a>.</p>
+<p>A standard approach to fitting the Lasso is coordinate descent, as done in R&#39;s <em>glmnet</em> package, documented here in <a href="http://www.jstatsoft.org/v33/i01">Friedman et al.&#39;s well-known (1700 citations according to Google scholar!) paper</a> on computation for penalized GLMs.</p>
 
 <p>To test out my code, I&#39;m going to generate a large simulated dataset, with 10 non-zero coefficients of varying size and 90 zero coefficients. The individual coefficient updates are similar to the coordinate descent for linear regression, involving covariances between residuals and predictor, but with thresholding. For the example here, I just do this with a single value of the penalty parameter, \(\lambda\), but one could readily extend this to compute the solution path across different values of \(\lambda\), using the idea of warm starts, in which the optimization for the next value of the penalty starts at the estimates found for the current value of the penalty. </p>
 
-<pre><code class="python"># put in lasso code
+<p>First I&#39;ll generate some simulated data with known coefficients. In this case the code is set up to either generate independent predictors or autocorrelated predictors, depending on the value of <em>autocorr</em>.</p>
+
+<pre><code class="python">import numpy as np
+from operator import add
+
+n = 10000000
+P = 100
+nNonZero = 10
+
+betaTrue = [-2, -1.5, -1.0, -0.5, -0.3, -0.1, 0.3, 0.5, 1.0, 1.5]
+betaTrue = np.append(betaTrue, np.zeros(P-nNonZero))
+
+const1 = sc.broadcast(P)
+const2 = sc.broadcast(betaTrue)
+const3 = sc.broadcast(n)
+
+# create dataset as RDD
+
+# allow generation of autocorrelated X&#39;s to make optimiz&#39;n harder
+autocorr = 1
+rho = 0.7
+const = sc.broadcast(autocorr)
+rho = sc.broadcast(rho)
+
+def simData(it):
+    np.random.seed(it)
+    x = np.random.normal(size = P)
+    if autocorr == 1:
+        for ind in xrange(P-1):
+            x[ind+1] = rho*x[ind] + x[ind+1]
+    y = sum(x*betaTrue) + np.random.normal(size = 1)
+    return(np.append(x, y))
+
+data = sc.parallelize(xrange(n)).repartition(192).map(simData)
 </code></pre>
 
-<p>Note that my implementation here is the somewhat simplistic X algorithm. The Y algorithm presented in Friedman et al. makes use of the sparsity of the coefficient vector to achieve computational speedup.</p>
+<pre><code class="python">def readPointBatch(iterator):
+    vals = list(iterator)
+    matrix = np.zeros((len(vals), P+1))
+    for i in xrange(len(vals)):
+        matrix[i] = vals[i]
+    return [matrix]
+
+batches = data.mapPartitions(readPointBatch)
+</code></pre>
+
+<p>Now I&#39;ll standardize the predictors so we can directly implement the equations of the Friedman et al. paper.</p>
+
+<pre><code class="python">def getSums(mat):
+    return mat.sum(axis = 0)
+
+colMeans = (batchesTmp.map(getSums).reduce(add) / n)[0:P]
+
+const = sc.broadcast(colMeans)
+
+def stdizeMean(mat):
+    mat[:, 0:P] = mat[:, 0:P] - colMeans
+    return mat
+
+batches = batches.map(stdizeMean).cache()
+
+def getSumSqs(mat):
+    return (mat*mat).sum(axis = 0)
+
+colSds = (pow(batches.map(getSumSqs).reduce(add) / n, 0.5))[0:P]
+
+def stdizeSd(mat):
+    mat[:, 0:P] = mat[:, 0:P] / colSds[0:P]
+    return mat
+
+batches = batches.map(stdizeSd).cache()
+
+</code></pre>
+
+<p>Now we&#39;ll implement the basic <em>naive algorithm</em> from the Friedman et al. paper.</p>
+
+<pre><code class="python">eps = 0.01
+alpha = 1 - eps
+lamb = 1
+
+def Sfun(z, gamma):
+    if gamma &gt;= abs(z):
+        return(0)
+    if z &gt; 0:
+        return(z - gamma)
+    return(z + gamma)
+
+def getNumBatch(mat):
+    # beta[p] = 0
+    if nonZeros == None:
+        sumXb = 0
+    else:
+        # poor man&#39;s sparse implementation
+        sumXb = mat[:, nonZeros].dot(beta[nonZeros])
+    return(sum((mat[:,P] - sumXb)*mat[:,p]))
+
+
+beta = np.array([0.0] * P)
+nonZeros = None
+p = 0
+
+oldBeta = beta.copy()
+
+it = 0
+
+for it in range(1,6):
+    for p in xrange(P):
+        # distribute current beta and current coordinate
+        const1 = sc.broadcast(beta)
+        const2 = sc.broadcast(p)
+        const3 = sc.broadcast(nonZeros)
+        # get numerator as product of residual and X for coordinate
+        sumNum = batches.map(getNumBatch).reduce(add)
+        beta[p] = Sfun(sumNum/n + beta[p], lamb*alpha) / (1 + lamb*eps)
+        if beta[p] != 0:
+            if nonZeros == None:
+                nonZeros = np.array([p])
+            elif sum(p == nonZeros) == 0:
+                nonZeros = np.append(nonZeros, p)
+                nonZeros.sort()
+        print(&quot;Updated var &quot; + str(p) + &quot; in iteration &quot;, str(it), &quot;.&quot;)
+    crit = sum(abs(beta - oldBeta))
+    oldBeta = beta.copy()
+    print(&quot;-&quot;*100)
+    print(beta)
+    print(crit)
+    print(&quot;-&quot;*100)
+</code></pre>
+
+<p>XXX - indicate results XXXX</p>
+
+<p>As noted, I implemented the <em>naive algorithm</em>. The <em>covariance updating algorithm</em> also presented in Friedman et al. makes use of the sparsity of the coefficient vector to achieve computational speedup.</p>
 
 <h2>3.4) Linear regression via gradient descent</h2>
 
@@ -990,7 +1118,7 @@ def obj(mat):
 
 objValue = batches.map(obj).reduce(add)
 
-nIts = 100
+nIts = 300
 
 storeVals = np.zeros((nIts, P+2))
 
@@ -1011,7 +1139,17 @@ for it in range(1,nIts):
     print(crit)
     print(pow(objValue/n,0.5))
     print(&quot;-&quot;*100)
+# ....
+# 99
+#[ 6.5580312   0.75471562 -0.91028266  0.17939929  2.00668012  2.66706259
+# -2.62962892 -0.34925791]
+#0.011090628482
+#29.837622418
 </code></pre>
+
+<p>Each of the gradient calculation and objective function calculation take about 5 seconds per iteration. </p>
+
+<p>It takes a while in terms of number of iterations, but when I ran it for another 300 iterations it was getting fairly close to the MLE (plus/minus .05 for all the coefficients). And that was without any tuning of the step size or checking for steps that go too far (though I don&#39;t think any of the steps resulted in an increase in the objective function).</p>
 
 <h2>3.5) Stochastic gradient descent and MLlib</h2>
 
@@ -1019,7 +1157,11 @@ for it in range(1,nIts):
 
 <p>One standard method in fitting large datasets is stochastic gradient descent, which involves choosing a random subset of the observations to use to compute the gradient at each update. MLlib relies heavily on SGD and the Spark documentation provides details.</p>
 
-<p>maybe show the SGD lin regr example</p>
+<p>[maybe show the SGD lin regr example]</p>
+
+<h2>3.6 Uncertainty</h2>
+
+<p>I&#39;d have my Statistics PhD revoked if I didn&#39;t say anything about uncertainty estimates, beyond simply getting estimates. For small \(p\), one can do the usual computation of regression and GLMs standard errors/covariances. For large \(p\), my understanding is that this is a hard problem, and I haven&#39;t had a chance to dig into the literature to figure out the state of the art.</p>
 
 <h1>4) Final thoughts</h1>
 
@@ -1041,25 +1183,28 @@ for it in range(1,nIts):
 
 <p>Many &ldquo;big data&rdquo; problems will fit on disk (and sometimes even in memory on machines with a lot of memory) on a single machine. If so, you may be better off doing the work on a single machine, potentially parallelizing calculations across multiple cores on that machine. Here are some of the tools that are useful for dealing with large datasets.</p>
 
-<p>SAS for serial on-disk data processing</p>
+<ul>
+<li><p>SQL for serial on-disk processing (e.g., from R or Python)</p></li>
+<li><p>SAS for serial on-disk data processing</p></li>
+<li><p><em>ff</em> or <em>bigmatrix</em> packages in R for serial on-disk data processing (and <em>biglm</em> for fitting large linear models and GLMs)</p></li>
+<li><p><em>data.table</em> package in R for serial in-memory processing (this is fast if things fit in memory)</p></li>
+<li><p><em>pbd</em> package in R for distributed computation, particularly linear algebra and distributed matrices</p></li>
+<li><p>numpy provides memory-mapped files via <a href="http://docs.scipy.org/doc/numpy/reference/generated/numpy.memmap.html"><em>numpy.memmap()</em></a></p></li>
+</ul>
 
-<p>ff/bigmatrix in R for serial on-disk data processing (and biglm for fitting large linear models and GLMs)</p>
+<!--
+I think the thing you are asking about it called memory-mapping in Python.
+I've used this functionality in NumPy:
+http://docs.scipy.org/doc/numpy/reference/generated/numpy.memmap.html
+But it is also available (although I haven't used this) in standard Python:
+https://docs.python.org/2/library/mmap.html
+-->
 
-<p>SQL for serial on-disk processing (e.g., from R or Python)</p>
-
-<p>data.table in R for serial in-memory processing (this is fast if things fit in memory)</p>
-
-<p>pbd in R for distributed computation, particularly linear algebra and distributed matrices</p>
-
-<p>I think the thing you are asking about it called memory-mapping in Python.
-I&#39;ve used this functionality in NumPy:
-<a href="http://docs.scipy.org/doc/numpy/reference/generated/numpy.memmap.html">http://docs.scipy.org/doc/numpy/reference/generated/numpy.memmap.html</a>
-But it is also available (although I haven&#39;t used this) in standard Python:
-<a href="https://docs.python.org/2/library/mmap.html">https://docs.python.org/2/library/mmap.html</a></p>
-
-<p>Manual coding to process data in batches from disk in any language</p>
-
-<p>up-coming updates to LAPACK, ScaLAPACK for linear algebra on distributed memory clusters and on GPUs</p>
+<ul>
+<li><p>manual coding to process data in batches from disk in any language</p></li>
+<li><p>serial processing of files using UNIX tools such as <em>sed</em>, <em>grep</em>, <em>cut</em>, etc.</p></li>
+<li><p>up-coming updates to LAPACK, ScaLAPACK for linear algebra on distributed memory clusters and on GPUs</p></li>
+</ul>
 
 <h2>4.4) More resources</h2>
 
@@ -1072,13 +1217,12 @@ But it is also available (although I haven&#39;t used this) in standard Python:
 
 <h1>5) Homework</h1>
 
-<p>1) some sort of preprocessing calculation</p>
+<p>1) Suppose we wanted to find the number of departing flights from each airport and add this as a column to our RDD, with the obvious key being the departure airport for each flight. Implement this using Spark. Essentially, of course, you&#39;re doing a manual database join. One could then, for example, add the log of the number of flights as a predictor in our regression modeling of flight delays.</p>
 
-<p>2) let&#39;s say log regr with IRLS (and possible asymp cov - inverse of XtWX where w = p(1-p))
-can&#39;t have p be too big so matrix calcs not bad
-perhaps just generate simulated data?</p>
-
-<p>say 100m obs, 1000 vars</p>
+<p>2) Consider logistic regression. Fit a logistic regression model for the probability that a departure delay
+is greater than 30 minutes. You&#39;re welcome to use whatever predictors you like, but you might just use
+the ones I&#39;ve used above (distance and day of week). Work out the code to implement logistic regression where at each 
+iteration you solve a least squares problem in close form using the working weights and working observations.</p>
 
 </body>
 
