@@ -689,6 +689,12 @@ output.count()
 medianResults = output.map(medianFun).collect()
 medianResults[0:3]
 # [(u&#39;EA-11-ATL-DEN&#39;, 0.0), (u&#39;NW-11-MSP-SDF&#39;, -3.0), (u&#39;DH-8-HPN-ORD&#39;, -7.0)]
+
+# here&#39;s code to show the iterable object produced by groupByKey()
+dat = output.take(1)
+dat[0][0]
+len(dat[0][1])
+[val for val in dat[0][1]]
 </code></pre>
 
 <p>Note that the median calculation is another map function not a reduce, because it&#39;s just a 1-1 transformation of the RDD that is returned by <code>groupByKey()</code>. But of course the size of the value for each key is much larger before the application of the <code>medianFun()</code> map step</p>
@@ -853,8 +859,8 @@ mles = np.linalg.solve(suffStats[0:P,0:P], suffStats[0:P,P])
         matrix[i] = xVec
     return [matrix.T.dot(matrix)]
 
-summStats = lines.mapPartitions(readPointBatch).reduce(add)
-mles = np.linalg.solve(summStats[0:P,0:P], summStats[0:P,P])
+suffStats2 = lines.mapPartitions(readPointBatch).reduce(add)
+mles = np.linalg.solve(suffStats2[0:P,0:P], suffStats2[0:P,P])
 </code></pre>
 
 <p>It&#39;s not entirely clear to me why I needed to return a list with a single matrix from <code>readPointBatch()</code> as opposed to simply returning the matrix, but I expect it&#39;s just that PySpark needs each element of the RDD to be a list (or perhaps a tuple instead). </p>
