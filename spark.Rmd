@@ -960,36 +960,29 @@ for it in range(0,nIts):
     print(beta)
     print(crit)
     print("-"*100)
-
-      [  0.18567818,  -1.68283553,  -1.72371224,  -1.22416959,
-         -0.45692377,   0.        ,   0.        ,   0.        ,
-          0.32505124,   1.3951588 ,   1.77561668,   0.        ,
-          0.        ,   0.        ,   0.        ,   0.        ,
-          0.        ,   0.        ,   0.        ,   0.        ,
-          0.        ,   0.        ,   0.        ,   0.        ,
-          0.        ,   0.        ,   0.        ,   0.        ,
-          0.        ,   0.        ,   0.        ,   0.        ,
-          0.        ,   0.        ,   0.        ,   0.        ,
-          0.        ,   0.        ,   0.        ,   0.        ,
-          0.        ,   0.        ,   0.        ,   0.        ,
-          0.        ,   0.        ,   0.        ,   0.        ,
-          0.        ,   0.        ,   0.        ,   0.        ,
-          0.        ,   0.        ,   0.        ,   0.        ,
-          0.        ,   0.        ,   0.        ,   0.        ,
-          0.        ,   0.        ,   0.        ,   0.        ,
-          0.        ,   0.        ,   0.        ,   0.        ,
-          0.        ,   0.        ,   0.        ,   0.        ,
-          0.        ,   0.        ,   0.        ,   0.        ,
-          0.        ,   0.        ,   0.        ,   0.        ,
-          0.        ,   0.        ,   0.        ,   0.        ,
-          0.        ,   0.        ,   0.        ,   0.        ,
-          0.        ,   0.        ,   0.        ,   0.        ,
-          0.        ,   0.        ,   0.        ,   0.        ,
-          0.        ,   0.        ,   0.        ,   0.        ,   0.        ]])
+#('Updated var 99 in iteration ', '5', '.')
+#----------------------------------------------------------------------------------------------------
+#[-1.68283553 -1.72371224 -1.22416959 -0.45692377  0.          0.          0.
+#  0.32505124  1.3951588   1.77561668  0.          0.          0.          0.
+#  0.          0.          0.          0.          0.          0.          0.
+#  0.          0.          0.          0.          0.          0.          0.
+#  0.          0.          0.          0.          0.          0.          0.
+#  0.          0.          0.          0.          0.          0.          0.
+#  0.          0.          0.          0.          0.          0.          0.
+#  0.          0.          0.          0.          0.          0.          0.
+#  0.          0.          0.          0.          0.          0.          0.
+#  0.          0.          0.          0.          0.          0.          0.
+#  0.          0.          0.          0.          0.          0.          0.
+#  0.          0.          0.          0.          0.          0.          0.
+#  0.          0.          0.          0.          0.          0.          0.
+#  0.          0.          0.          0.          0.          0.          0.
+#  0.          0.        ]
+#0.18567818344
+#----------------------------------------------------------------------------------------------------
 
 ```
 
-After 5 iterations, the Lasso seems to be getting close to convergence (the sum of the absolute difference in the coefficients is 0.19). 
+After 5 iterations, the Lasso seems to be getting close to convergence (the sum of the absolute difference in the coefficients is 0.19). Each update of a coefficient takes about 3 seconds and a single full iteration about 6 minutes.
 
 As noted, I implemented the *naive algorithm*. The *covariance updating algorithm* also presented in Friedman et al. makes use of the sparsity of the coefficient vector to achieve computational speedup.
 
