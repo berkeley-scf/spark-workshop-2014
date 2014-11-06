@@ -301,7 +301,9 @@ You should see there are about 123 million observations (rows) in the dataset (t
 
 #### What if the data are not one-line-per-row?
 
-You can read in each file as an individual observation using `wholeTextFiles()` and you can use `flatMap()` to convert one row into multiple observations.
+You can read in each file as an individual observation using `wholeTextFiles()`.
+
+You can use `flatMap()` if each row contains multiple observations.
 
 #### Reading into Spark from S3
 
@@ -431,9 +433,9 @@ createKeyValue(oneLine[0])
 keyValues = lines.map(createKeyValue).cache()
 twoKeyValues = keyValues.take(2)
 twoKeyValues
-# [(u'AVPPIT', 1), (u'LAXIND', 1)]
+# [(u'AVP-PIT', 1), (u'LAX-IND', 1)]
 twoKeyCounts = keyValues.reduceByKey(add).take(2)
-# [(u'ORDSEA', 101949), (u'MCIMSY', 925)]
+# [(u'ORD-SEA', 101949), (u'MCI-MSY', 925)]
 ```
 
 Make sure you know what kind of Python object is in use for each observation in the RDD - originally it's often just a text line from CSV, but after mapping it would often be a tuple or a list. It's good to check your code on individual elements or pairs of elements from the RDD obtained via `take()`. Note that sometimes things will be embedded in a list and you'll need to burrow into it as seen in the example where we had a list of length one containing the string.
@@ -816,7 +818,7 @@ Each update of a coordinate takes about a 7 seconds.
 
 ## 3.3) Lasso via coordinate descent
 
-A standard approach to fitting the Lasso is coordinate descent, as done in R's *glmnet* package, documented here in [Friedman et al.'s well-known (1700 citations according to Google scholar!) paper](http://www.jstatsoft.org/v33/i01) on computation for penalized GLMs.
+A standard approach to fitting the Lasso is coordinate descent, as done in R's *glmnet* package, documented here in [Friedman et al.'s well-known paper](http://www.jstatsoft.org/v33/i01) (1700 citations according to Google scholar!) on computation for penalized GLMs.
 
 To test out my code, I'm going to generate a large simulated dataset, with 10 non-zero coefficients of varying size and 90 zero coefficients. The individual coefficient updates are similar to the coordinate descent for linear regression, involving covariances between residuals and predictor, but with thresholding. For the example here, I just do this with a single value of the penalty parameter, $\lambda$, but one could readily extend this to compute the solution path across different values of $\lambda$, using the idea of warm starts, in which the optimization for the next value of the penalty starts at the estimates found for the current value of the penalty. 
 
@@ -842,8 +844,8 @@ const3 = sc.broadcast(n)
 # allow generation of autocorrelated X's to make optimiz'n harder
 autocorr = 1
 rho = 0.7
-const = sc.broadcast(autocorr)
-rho = sc.broadcast(rho)
+const1 = sc.broadcast(autocorr)
+const2 = sc.broadcast(rho)
 
 def simData(it):
     np.random.seed(it)
@@ -854,8 +856,10 @@ def simData(it):
     y = sum(x*betaTrue) + np.random.normal(size = 1)
     return(np.append(x, y))
 
-data = sc.parallelize(xrange(n)).repartition(192).map(simData)
+data = sc.parallelize(xrange(n)).repartition(96).map(simData)
 ```
+
+As with the regression, let's set up each batch to have all of its data as a single matrix.
 
 ```{r, eval=FALSE}
 def readPointBatch(iterator):
@@ -865,7 +869,7 @@ def readPointBatch(iterator):
         matrix[i] = vals[i]
     return [matrix]
 
-batches = data.mapPartitions(readPointBatch)
+batchesLasso = data.mapPartitions(readPointBatch)
 ```
 
 Now I'll standardize the predictors so we can directly implement the equations of the Friedman et al. paper.
@@ -874,7 +878,7 @@ Now I'll standardize the predictors so we can directly implement the equations o
 def getSums(mat):
     return mat.sum(axis = 0)
 
-colMeans = (batchesTmp.map(getSums).reduce(add) / n)[0:P]
+colMeans = (batchesLasso.map(getSums).reduce(add) / n)[0:P]
 
 const = sc.broadcast(colMeans)
 
@@ -882,28 +886,28 @@ def stdizeMean(mat):
     mat[:, 0:P] = mat[:, 0:P] - colMeans
     return mat
 
-batches = batches.map(stdizeMean).cache()
+batchesLasso = batchesLasso.map(stdizeMean)
 
 def getSumSqs(mat):
     return (mat*mat).sum(axis = 0)
 
-colSds = (pow(batches.map(getSumSqs).reduce(add) / n, 0.5))[0:P]
+colSds = (pow(batchesLasso.map(getSumSqs).reduce(add) / n, 0.5))[0:P]
 
 def stdizeSd(mat):
     mat[:, 0:P] = mat[:, 0:P] / colSds[0:P]
     return mat
 
-batches = batches.map(stdizeSd).cache()
+batchesLasso = batchesLasso.map(stdizeSd).cache()
 
 ```
 
-Now we'll implement the basic *naive algorithm* from the Friedman et al. paper.
+Now we'll implement the basic *naive algorithm* from the Friedman et al. paper. 
 
 
 ```{r, eval=FALSE}
 eps = 0.01
-alpha = 1 - eps
-lamb = 1
+alpha = 1 - eps  # lasso penalty
+lamb = 0.5   # value of penalty parameter
 
 def Sfun(z, gamma):
     if gamma >= abs(z):
@@ -913,7 +917,6 @@ def Sfun(z, gamma):
     return(z + gamma)
 
 def getNumBatch(mat):
-    # beta[p] = 0
     if nonZeros == None:
         sumXb = 0
     else:
@@ -930,14 +933,17 @@ oldBeta = beta.copy()
 
 it = 0
 
-for it in range(1,6):
+nIts = 6
+storeVals = np.zeros((nIts, P+1))
+
+for it in range(0,nIts):
     for p in xrange(P):
         # distribute current beta and current coordinate
         const1 = sc.broadcast(beta)
         const2 = sc.broadcast(p)
         const3 = sc.broadcast(nonZeros)
         # get numerator as product of residual and X for coordinate
-        sumNum = batches.map(getNumBatch).reduce(add)
+        sumNum = batchesLasso.map(getNumBatch).reduce(add)
         beta[p] = Sfun(sumNum/n + beta[p], lamb*alpha) / (1 + lamb*eps)
         if beta[p] != 0:
             if nonZeros == None:
@@ -947,14 +953,43 @@ for it in range(1,6):
                 nonZeros.sort()
         print("Updated var " + str(p) + " in iteration ", str(it), ".")
     crit = sum(abs(beta - oldBeta))
+    storeVals[it, 0] = crit
+    storeVals[it, 1:(P+1)] = beta
     oldBeta = beta.copy()
     print("-"*100)
     print(beta)
     print(crit)
     print("-"*100)
+
+      [  0.18567818,  -1.68283553,  -1.72371224,  -1.22416959,
+         -0.45692377,   0.        ,   0.        ,   0.        ,
+          0.32505124,   1.3951588 ,   1.77561668,   0.        ,
+          0.        ,   0.        ,   0.        ,   0.        ,
+          0.        ,   0.        ,   0.        ,   0.        ,
+          0.        ,   0.        ,   0.        ,   0.        ,
+          0.        ,   0.        ,   0.        ,   0.        ,
+          0.        ,   0.        ,   0.        ,   0.        ,
+          0.        ,   0.        ,   0.        ,   0.        ,
+          0.        ,   0.        ,   0.        ,   0.        ,
+          0.        ,   0.        ,   0.        ,   0.        ,
+          0.        ,   0.        ,   0.        ,   0.        ,
+          0.        ,   0.        ,   0.        ,   0.        ,
+          0.        ,   0.        ,   0.        ,   0.        ,
+          0.        ,   0.        ,   0.        ,   0.        ,
+          0.        ,   0.        ,   0.        ,   0.        ,
+          0.        ,   0.        ,   0.        ,   0.        ,
+          0.        ,   0.        ,   0.        ,   0.        ,
+          0.        ,   0.        ,   0.        ,   0.        ,
+          0.        ,   0.        ,   0.        ,   0.        ,
+          0.        ,   0.        ,   0.        ,   0.        ,
+          0.        ,   0.        ,   0.        ,   0.        ,
+          0.        ,   0.        ,   0.        ,   0.        ,
+          0.        ,   0.        ,   0.        ,   0.        ,
+          0.        ,   0.        ,   0.        ,   0.        ,   0.        ]])
+
 ```
 
-XXX - indicate results XXXX
+After 5 iterations, the Lasso seems to be getting close to convergence (the sum of the absolute difference in the coefficients is 0.19). 
 
 As noted, I implemented the *naive algorithm*. The *covariance updating algorithm* also presented in Friedman et al. makes use of the sparsity of the coefficient vector to achieve computational speedup.
 
@@ -999,6 +1034,7 @@ nIts = 300
 
 storeVals = np.zeros((nIts, P+2))
 
+# for simplicity do a fixed number of iterations
 for it in range(1,nIts):
     gradVec = batches.map(getGradBatch).reduce(add)
     # update coefficients via simple gradient descent
@@ -1024,7 +1060,7 @@ for it in range(1,nIts):
 #29.837622418
 ```
 
-Each of the gradient calculation and objective function calculation take about 5 seconds per iteration. 
+Each of the gradient calculation and objective function calculation take about 5 seconds per iteration. With $p=100$, the whole thing takes a while
 
 It takes a while in terms of number of iterations, but when I ran it for another 300 iterations it was getting fairly close to the MLE (plus/minus .05 for all the coefficients). And that was without any tuning of the step size or checking for steps that go too far (though I don't think any of the steps resulted in an increase in the objective function).
 
@@ -1050,11 +1086,11 @@ I ran into an installation issue when installing on the SCF and haven't had a ch
 
 ## 4.2) Additional features of Spark
 
-Spark SQL allows you to do SQL queries on RDDs. 
+*Spark SQL* allows you to do SQL queries on RDDs. 
 
-Spark Streaming allows you to work with data arriving in an on-line manner. 
+*Spark Streaming* allows you to work with data arriving in an on-line manner. 
 
-SparkR provides an R interface. It's in development on [Github](http://amplab-extras.github.io/SparkR-pkg/).
+*SparkR* provides an R interface. It's in available on [Github](http://amplab-extras.github.io/SparkR-pkg/). The Spark developers tell me it's not on the main Spark webpage as it's not part of Apache but that it has all the main features of PySpark and is under active development.
 
 ## 4.3) Alternatives to Spark
 
@@ -1071,7 +1107,7 @@ Many "big data" problems will fit on disk (and sometimes even in memory on machi
 
   - *pbd* package in R for distributed computation, particularly linear algebra and distributed matrices
 
-  - numpy provides memory-mapped files via [*numpy.memmap()*](http://docs.scipy.org/doc/numpy/reference/generated/numpy.memmap.html)
+  - *numpy* provides memory-mapped files via [*numpy.memmap()*](http://docs.scipy.org/doc/numpy/reference/generated/numpy.memmap.html)
 
 <!--
 I think the thing you are asking about it called memory-mapping in Python.
@@ -1093,17 +1129,19 @@ https://docs.python.org/2/library/mmap.html
   - Most of this workshop is based on the [Spark programming guide](http://spark.apache.org/docs/latest/programming-guide.html).
   - [Here are some online resources from databricks](http://databricks.com/spark-training-resources)
   - AMPLab runs the [AmpCamp](http://ampcamp.berkeley.edu/). The next one is Nov. 20-21, 2014, though it's expensive if you can't leverage an invitation through a connection with AMPLab.
-  - The AMPLab will have  dry runs of the AmpCamp talks that you are welcome to attend and give feedback on. Nov. 13, 10 am - 4 pm in Soda 606. Dry runs for the AmpCamp exercises will be Nov. 17, 4 pm - 7 pm, Soda 405. First come first served.
+  - The AMPLab will have  dry runs of the AmpCamp talks that you are welcome to attend and give feedback on. These will be Nov. 13, 10 am - 4 pm in Soda 606. Dry runs for the AmpCamp exercises will be Nov. 17, 4 pm - 7 pm, Soda 405. First come first served.
 
 
 # 5) Homework
 
-1) Suppose we wanted to find the number of departing flights from each airport and add this as a column to our RDD, with the obvious key being the departure airport for each flight. Implement this using Spark. Essentially, of course, you're doing a manual database join. One could then, for example, add the log of the number of flights as a predictor in our regression modeling of flight delays.
+0) Try to run the demo code given in this document yourself. Try some small tweaks and play around some.
+
+1) Suppose we wanted to find the number of departing flights from each airport and add this as a column to our RDD, matched of course to the departure airport for each flight. Implement this using Spark. Essentially, of course, you're doing a manual database join. One could then, for example, add the log of the number of flights as a predictor in our regression modeling of flight delays.
 
 2) Consider logistic regression. Fit a logistic regression model for the probability that a departure delay
 is greater than 30 minutes. You're welcome to use whatever predictors you like, but you might just use
 the ones I've used above (distance and day of week). Work out the code to implement logistic regression where at each 
-iteration you solve a least squares problem in close form using the working weights and working observations.
+iteration you solve a least squares problem in closed form using the working weights and working observations of the usual IWLS/IRLS algorithm.
 
 
 

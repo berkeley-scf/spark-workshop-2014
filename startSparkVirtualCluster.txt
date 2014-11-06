@@ -38,7 +38,7 @@ screen -x -RR
 
 This will put you in a shell session that you'll be able to go back to even if you lose your connection. If you lose the connection then when you connect back to the master node, type "screen -x -RR" again and you should be back where you were.
 
-6) Now you can follow the template provided in the Spark workshop notes in spark.Rmd to use Spark.
+6) Now you can follow the template provided in the Spark workshop notes in spark.html to use Spark. The spark.Rmd is a Markdown (and therefore plain text file) used to generate spark.html and from which it may be easier to copy/paste syntax for the bash and Python code.
 
 7) IMPORTANT: delete your cluster as soon as you are done with it. We only have a limited number of credits for everyone in the class to use.
 

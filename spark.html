@@ -453,7 +453,9 @@ lines.count()
 
 <h4>What if the data are not one-line-per-row?</h4>
 
-<p>You can read in each file as an individual observation using <code>wholeTextFiles()</code> and you can use <code>flatMap()</code> to convert one row into multiple observations.</p>
+<p>You can read in each file as an individual observation using <code>wholeTextFiles()</code>.</p>
+
+<p>You can use <code>flatMap()</code> if each row contains multiple observations.</p>
 
 <h4>Reading into Spark from S3</h4>
 
@@ -574,9 +576,9 @@ createKeyValue(oneLine[0])
 keyValues = lines.map(createKeyValue).cache()
 twoKeyValues = keyValues.take(2)
 twoKeyValues
-# [(u&#39;AVPPIT&#39;, 1), (u&#39;LAXIND&#39;, 1)]
+# [(u&#39;AVP-PIT&#39;, 1), (u&#39;LAX-IND&#39;, 1)]
 twoKeyCounts = keyValues.reduceByKey(add).take(2)
-# [(u&#39;ORDSEA&#39;, 101949), (u&#39;MCIMSY&#39;, 925)]
+# [(u&#39;ORD-SEA&#39;, 101949), (u&#39;MCI-MSY&#39;, 925)]
 </code></pre>
 
 <p>Make sure you know what kind of Python object is in use for each observation in the RDD - originally it&#39;s often just a text line from CSV, but after mapping it would often be a tuple or a list. It&#39;s good to check your code on individual elements or pairs of elements from the RDD obtained via <code>take()</code>. Note that sometimes things will be embedded in a list and you&#39;ll need to burrow into it as seen in the example where we had a list of length one containing the string.</p>
@@ -945,7 +947,7 @@ print beta
 
 <h2>3.3) Lasso via coordinate descent</h2>
 
-<p>A standard approach to fitting the Lasso is coordinate descent, as done in R&#39;s <em>glmnet</em> package, documented here in <a href="http://www.jstatsoft.org/v33/i01">Friedman et al.&#39;s well-known (1700 citations according to Google scholar!) paper</a> on computation for penalized GLMs.</p>
+<p>A standard approach to fitting the Lasso is coordinate descent, as done in R&#39;s <em>glmnet</em> package, documented here in <a href="http://www.jstatsoft.org/v33/i01">Friedman et al.&#39;s well-known paper</a> (1700 citations according to Google scholar!) on computation for penalized GLMs.</p>
 
 <p>To test out my code, I&#39;m going to generate a large simulated dataset, with 10 non-zero coefficients of varying size and 90 zero coefficients. The individual coefficient updates are similar to the coordinate descent for linear regression, involving covariances between residuals and predictor, but with thresholding. For the example here, I just do this with a single value of the penalty parameter, \(\lambda\), but one could readily extend this to compute the solution path across different values of \(\lambda\), using the idea of warm starts, in which the optimization for the next value of the penalty starts at the estimates found for the current value of the penalty. </p>
 
@@ -970,8 +972,8 @@ const3 = sc.broadcast(n)
 # allow generation of autocorrelated X&#39;s to make optimiz&#39;n harder
 autocorr = 1
 rho = 0.7
-const = sc.broadcast(autocorr)
-rho = sc.broadcast(rho)
+const1 = sc.broadcast(autocorr)
+const2 = sc.broadcast(rho)
 
 def simData(it):
     np.random.seed(it)
@@ -982,8 +984,10 @@ def simData(it):
     y = sum(x*betaTrue) + np.random.normal(size = 1)
     return(np.append(x, y))
 
-data = sc.parallelize(xrange(n)).repartition(192).map(simData)
+data = sc.parallelize(xrange(n)).repartition(96).map(simData)
 </code></pre>
+
+<p>As with the regression, let&#39;s set up each batch to have all of its data as a single matrix.</p>
 
 <pre><code class="python">def readPointBatch(iterator):
     vals = list(iterator)
@@ -992,7 +996,7 @@ data = sc.parallelize(xrange(n)).repartition(192).map(simData)
         matrix[i] = vals[i]
     return [matrix]
 
-batches = data.mapPartitions(readPointBatch)
+batchesLasso = data.mapPartitions(readPointBatch)
 </code></pre>
 
 <p>Now I&#39;ll standardize the predictors so we can directly implement the equations of the Friedman et al. paper.</p>
@@ -1000,7 +1004,7 @@ batches = data.mapPartitions(readPointBatch)
 <pre><code class="python">def getSums(mat):
     return mat.sum(axis = 0)
 
-colMeans = (batchesTmp.map(getSums).reduce(add) / n)[0:P]
+colMeans = (batchesLasso.map(getSums).reduce(add) / n)[0:P]
 
 const = sc.broadcast(colMeans)
 
@@ -1008,26 +1012,26 @@ def stdizeMean(mat):
     mat[:, 0:P] = mat[:, 0:P] - colMeans
     return mat
 
-batches = batches.map(stdizeMean).cache()
+batchesLasso = batchesLasso.map(stdizeMean)
 
 def getSumSqs(mat):
     return (mat*mat).sum(axis = 0)
 
-colSds = (pow(batches.map(getSumSqs).reduce(add) / n, 0.5))[0:P]
+colSds = (pow(batchesLasso.map(getSumSqs).reduce(add) / n, 0.5))[0:P]
 
 def stdizeSd(mat):
     mat[:, 0:P] = mat[:, 0:P] / colSds[0:P]
     return mat
 
-batches = batches.map(stdizeSd).cache()
+batchesLasso = batchesLasso.map(stdizeSd).cache()
 
 </code></pre>
 
-<p>Now we&#39;ll implement the basic <em>naive algorithm</em> from the Friedman et al. paper.</p>
+<p>Now we&#39;ll implement the basic <em>naive algorithm</em> from the Friedman et al. paper. </p>
 
 <pre><code class="python">eps = 0.01
-alpha = 1 - eps
-lamb = 1
+alpha = 1 - eps  # lasso penalty
+lamb = 0.5   # value of penalty parameter
 
 def Sfun(z, gamma):
     if gamma &gt;= abs(z):
@@ -1037,7 +1041,6 @@ def Sfun(z, gamma):
     return(z + gamma)
 
 def getNumBatch(mat):
-    # beta[p] = 0
     if nonZeros == None:
         sumXb = 0
     else:
@@ -1054,14 +1057,17 @@ oldBeta = beta.copy()
 
 it = 0
 
-for it in range(1,6):
+nIts = 6
+storeVals = np.zeros((nIts, P+1))
+
+for it in range(0,nIts):
     for p in xrange(P):
         # distribute current beta and current coordinate
         const1 = sc.broadcast(beta)
         const2 = sc.broadcast(p)
         const3 = sc.broadcast(nonZeros)
         # get numerator as product of residual and X for coordinate
-        sumNum = batches.map(getNumBatch).reduce(add)
+        sumNum = batchesLasso.map(getNumBatch).reduce(add)
         beta[p] = Sfun(sumNum/n + beta[p], lamb*alpha) / (1 + lamb*eps)
         if beta[p] != 0:
             if nonZeros == None:
@@ -1071,14 +1077,43 @@ for it in range(1,6):
                 nonZeros.sort()
         print(&quot;Updated var &quot; + str(p) + &quot; in iteration &quot;, str(it), &quot;.&quot;)
     crit = sum(abs(beta - oldBeta))
+    storeVals[it, 0] = crit
+    storeVals[it, 1:(P+1)] = beta
     oldBeta = beta.copy()
     print(&quot;-&quot;*100)
     print(beta)
     print(crit)
     print(&quot;-&quot;*100)
+
+      [  0.18567818,  -1.68283553,  -1.72371224,  -1.22416959,
+         -0.45692377,   0.        ,   0.        ,   0.        ,
+          0.32505124,   1.3951588 ,   1.77561668,   0.        ,
+          0.        ,   0.        ,   0.        ,   0.        ,
+          0.        ,   0.        ,   0.        ,   0.        ,
+          0.        ,   0.        ,   0.        ,   0.        ,
+          0.        ,   0.        ,   0.        ,   0.        ,
+          0.        ,   0.        ,   0.        ,   0.        ,
+          0.        ,   0.        ,   0.        ,   0.        ,
+          0.        ,   0.        ,   0.        ,   0.        ,
+          0.        ,   0.        ,   0.        ,   0.        ,
+          0.        ,   0.        ,   0.        ,   0.        ,
+          0.        ,   0.        ,   0.        ,   0.        ,
+          0.        ,   0.        ,   0.        ,   0.        ,
+          0.        ,   0.        ,   0.        ,   0.        ,
+          0.        ,   0.        ,   0.        ,   0.        ,
+          0.        ,   0.        ,   0.        ,   0.        ,
+          0.        ,   0.        ,   0.        ,   0.        ,
+          0.        ,   0.        ,   0.        ,   0.        ,
+          0.        ,   0.        ,   0.        ,   0.        ,
+          0.        ,   0.        ,   0.        ,   0.        ,
+          0.        ,   0.        ,   0.        ,   0.        ,
+          0.        ,   0.        ,   0.        ,   0.        ,
+          0.        ,   0.        ,   0.        ,   0.        ,
+          0.        ,   0.        ,   0.        ,   0.        ,   0.        ]])
+
 </code></pre>
 
-<p>XXX - indicate results XXXX</p>
+<p>After 5 iterations, the Lasso seems to be getting close to convergence (the sum of the absolute difference in the coefficients is 0.19). </p>
 
 <p>As noted, I implemented the <em>naive algorithm</em>. The <em>covariance updating algorithm</em> also presented in Friedman et al. makes use of the sparsity of the coefficient vector to achieve computational speedup.</p>
 
@@ -1122,6 +1157,7 @@ nIts = 300
 
 storeVals = np.zeros((nIts, P+2))
 
+# for simplicity do a fixed number of iterations
 for it in range(1,nIts):
     gradVec = batches.map(getGradBatch).reduce(add)
     # update coefficients via simple gradient descent
@@ -1147,7 +1183,7 @@ for it in range(1,nIts):
 #29.837622418
 </code></pre>
 
-<p>Each of the gradient calculation and objective function calculation take about 5 seconds per iteration. </p>
+<p>Each of the gradient calculation and objective function calculation take about 5 seconds per iteration. With \(p=100\), the whole thing takes a while</p>
 
 <p>It takes a while in terms of number of iterations, but when I ran it for another 300 iterations it was getting fairly close to the MLE (plus/minus .05 for all the coefficients). And that was without any tuning of the step size or checking for steps that go too far (though I don&#39;t think any of the steps resulted in an increase in the objective function).</p>
 
@@ -1173,11 +1209,11 @@ for it in range(1,nIts):
 
 <h2>4.2) Additional features of Spark</h2>
 
-<p>Spark SQL allows you to do SQL queries on RDDs. </p>
+<p><em>Spark SQL</em> allows you to do SQL queries on RDDs. </p>
 
-<p>Spark Streaming allows you to work with data arriving in an on-line manner. </p>
+<p><em>Spark Streaming</em> allows you to work with data arriving in an on-line manner. </p>
 
-<p>SparkR provides an R interface. It&#39;s in development on <a href="http://amplab-extras.github.io/SparkR-pkg/">Github</a>.</p>
+<p><em>SparkR</em> provides an R interface. It&#39;s in available on <a href="http://amplab-extras.github.io/SparkR-pkg/">Github</a>. The Spark developers tell me it&#39;s not on the main Spark webpage as it&#39;s not part of Apache but that it has all the main features of PySpark and is under active development.</p>
 
 <h2>4.3) Alternatives to Spark</h2>
 
@@ -1189,7 +1225,7 @@ for it in range(1,nIts):
 <li><p><em>ff</em> or <em>bigmatrix</em> packages in R for serial on-disk data processing (and <em>biglm</em> for fitting large linear models and GLMs)</p></li>
 <li><p><em>data.table</em> package in R for serial in-memory processing (this is fast if things fit in memory)</p></li>
 <li><p><em>pbd</em> package in R for distributed computation, particularly linear algebra and distributed matrices</p></li>
-<li><p>numpy provides memory-mapped files via <a href="http://docs.scipy.org/doc/numpy/reference/generated/numpy.memmap.html"><em>numpy.memmap()</em></a></p></li>
+<li><p><em>numpy</em> provides memory-mapped files via <a href="http://docs.scipy.org/doc/numpy/reference/generated/numpy.memmap.html"><em>numpy.memmap()</em></a></p></li>
 </ul>
 
 <!--
@@ -1212,17 +1248,19 @@ https://docs.python.org/2/library/mmap.html
 <li>Most of this workshop is based on the <a href="http://spark.apache.org/docs/latest/programming-guide.html">Spark programming guide</a>.</li>
 <li><a href="http://databricks.com/spark-training-resources">Here are some online resources from databricks</a></li>
 <li>AMPLab runs the <a href="http://ampcamp.berkeley.edu/">AmpCamp</a>. The next one is Nov. 20-21, 2014, though it&#39;s expensive if you can&#39;t leverage an invitation through a connection with AMPLab.</li>
-<li>The AMPLab will have  dry runs of the AmpCamp talks that you are welcome to attend and give feedback on. Nov. 13, 10 am - 4 pm in Soda 606. Dry runs for the AmpCamp exercises will be Nov. 17, 4 pm - 7 pm, Soda 405. First come first served.</li>
+<li>The AMPLab will have  dry runs of the AmpCamp talks that you are welcome to attend and give feedback on. These will be Nov. 13, 10 am - 4 pm in Soda 606. Dry runs for the AmpCamp exercises will be Nov. 17, 4 pm - 7 pm, Soda 405. First come first served.</li>
 </ul>
 
 <h1>5) Homework</h1>
 
-<p>1) Suppose we wanted to find the number of departing flights from each airport and add this as a column to our RDD, with the obvious key being the departure airport for each flight. Implement this using Spark. Essentially, of course, you&#39;re doing a manual database join. One could then, for example, add the log of the number of flights as a predictor in our regression modeling of flight delays.</p>
+<p>0) Try to run the demo code given in this document yourself. Try some small tweaks and play around some.</p>
+
+<p>1) Suppose we wanted to find the number of departing flights from each airport and add this as a column to our RDD, matched of course to the departure airport for each flight. Implement this using Spark. Essentially, of course, you&#39;re doing a manual database join. One could then, for example, add the log of the number of flights as a predictor in our regression modeling of flight delays.</p>
 
 <p>2) Consider logistic regression. Fit a logistic regression model for the probability that a departure delay
 is greater than 30 minutes. You&#39;re welcome to use whatever predictors you like, but you might just use
 the ones I&#39;ve used above (distance and day of week). Work out the code to implement logistic regression where at each 
-iteration you solve a least squares problem in close form using the working weights and working observations.</p>
+iteration you solve a least squares problem in closed form using the working weights and working observations of the usual IWLS/IRLS algorithm.</p>
 
 </body>
 

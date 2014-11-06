@@ -8,3 +8,5 @@ These instructions are for setting up your Amazon web services class account.
 All Buckets / spark-workshop-2014-<some digits> / home / <your_username>
 
 4) Download the spark-workshop-2014-credentials.boto file and the spark-workshop-2014-ssh_key.pem file to your local computer. You'll need to select each file and then choose "Actions -> Download".
+
+5) DO NOT, DO NOT, DO NOT in any way make the credentials in the spark-workshop-2014-credentials.boto public in any way. In particular do not put them into a public Github repository. One of the students in my Stat243 class did this, and hackers started up a bunch of instances in the AWS account and cost us about $700 in credits before we realized what was happening.
