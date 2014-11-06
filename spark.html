@@ -223,8 +223,10 @@ hr {
 <ol>
 <li><p>Since PySpark involves serializing Python objects to pass them to Java, it may be slower than using Java or Scala for your MapReduce code.  Here&#39;s a <a href="http://apache-spark-user-list.1001560.n3.nabble.com/Scala-vs-Python-performance-differences-td4247.html">thread with some info</a>.</p></li>
 <li><p>If you can run your job using the memory and disk space on a single machine, you may be better off doing so, given the overhead involved in working in a distributed fashion.  That said, Spark allows you to scale in a way that would otherwise be difficult.</p></li>
-<li><p>Note that I&#39;ve found the error messages in Spark (and also Hadoop) to be often very hard to understand. Some of this is because the messages are from the underlying Java implementation. So the process of figuring out syntax can be a bit painful at times. As usual, it&#39;s good to start with small test problems and to the extent possible test your Python code does what you expect before using that Python code in a Spark operation.</p></li>
+<li><p>Note that I&#39;ve found the error messages in Spark (and also Hadoop) to be often very hard to understand. Some of this is because the messages are from the underlying Java implementation. So the process of figuring out syntax can be a bit painful at times. As usual, it&#39;s good to start with small test problems and to the extent possible test your Python code does what you expect before using that Python code in a Spark operation. Look carefully for error messages coming from Python that indicate bugs in your Python code.</p></li>
 </ol>
+
+<p>In general, I&#39;m not advocating for you to use MapReduce or Spark. They might or might not be the right tool for your job. But I do think it&#39;s valuable to understand how they work and be able to assess if they would be helpful for a given computation you need to do. </p>
 
 <h2>1.3) Getting Spark running on an EC2-based cluster</h2>
 
@@ -252,7 +254,7 @@ AWS_ACCESS_KEY_ID=FILL_IN_YOUR_ACCESS_KEY
 AWS_SECRET_ACCESS_KEY=FILL_IN_YOUR_SECRET_KEY
 YOUR_NAME=SOME_UNIQUE_NAME_FOR_YOUR_CLUSTER
 cd /usr/local/linux/spark/ec2
-./spark-ec2 -k ec2star -i ~/.ssh/${SSH_KEY}.rsa --region=${REGION} -s ${CLUSTER_SIZE} -w $WAIT_TIME -v ${SPARK_VERSION} launch sparkvm-${YOUR_NAME}
+./spark-ec2 -k ${SSH_KEY} -i ~/.ssh/${SSH_KEY}.rsa --region=${REGION} -s ${CLUSTER_SIZE} -w $WAIT_TIME -v ${SPARK_VERSION} launch sparkvm-${YOUR_NAME}
 </code></pre>
 
 <p>You&#39;ll need to wait for a few minutes (in particular at least the number of seconds indicated above in the WAIT_TIME variable). Look carefully for error messages as sometimes the startup of the nodes and installation of the Spark software does not go smoothly. If all goes well, the end of the messages printed to the screen should look like this:</p>
@@ -527,7 +529,7 @@ type(sfo)
 # &lt;type &#39;list&#39;&gt;
 len(sfo) 
 # 2733910
-sfo[1] 
+sfo[1] # but remember Python indexing starts at 0 
 # u&#39;1992,1,2,4,708,705,1243,1222,US,1118,NA,215,197,NA,21,3,SFO,MCI,1499,NA,NA,0,NA,0,NA,NA,NA,NA,NA&#39;
 </code></pre>
 

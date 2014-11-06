@@ -382,7 +382,7 @@ type(sfo)
 # <type 'list'>
 len(sfo) 
 # 2733910
-sfo[1] 
+sfo[1] # but remember Python indexing starts at 0 
 # u'1992,1,2,4,708,705,1243,1222,US,1118,NA,215,197,NA,21,3,SFO,MCI,1499,NA,NA,0,NA,0,NA,NA,NA,NA,NA'
 ```
 
