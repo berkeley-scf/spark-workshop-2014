@@ -139,6 +139,11 @@ Note that when you want to shut down your cluster (and remember it will cost you
 ./spark-ec2 --region=${REGION} --delete-groups destroy sparkvm-${YOUR_NAME}
 ```
 
+If you want to see some of the various options and actions possible with the spark-ec2 script just do:
+```{r, eval=FALSE}
+./spark-ec2
+```
+
 ### 1.3.2) Navigating around your cluster
 
 First we'll login to the master node of our cluster.
@@ -153,7 +158,7 @@ ssh -i ~/.ssh/${SSH_KEY}.rsa root@ec2-54-71-181-49.us-west-2.compute.amazonaws.c
 
 Note that Spark expects you to be the root user so we'll do everything as root. Since this is a virtual cluster that we can shut down whenever we want, this isn't as dangerous as it would be with a regular computer.
 
-Sometimes your connection might be interrupted and you'll lose your work, so we'll run our work on the master node usnig the screen program:
+Sometimes your connection might be interrupted and you'll lose your work, so you may want to run your work on the master node using the UNIX *screen* program:
 
 ```{r, engine='bash'}
 screen -x -RR

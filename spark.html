@@ -298,6 +298,11 @@ Done!
 <pre><code class="python">./spark-ec2 --region=${REGION} --delete-groups destroy sparkvm-${YOUR_NAME}
 </code></pre>
 
+<p>If you want to see some of the various options and actions possible with the spark-ec2 script just do:</p>
+
+<pre><code class="python">./spark-ec2
+</code></pre>
+
 <h3>1.3.2) Navigating around your cluster</h3>
 
 <p>First we&#39;ll login to the master node of our cluster.</p>
@@ -312,7 +317,7 @@ Done!
 
 <p>Note that Spark expects you to be the root user so we&#39;ll do everything as root. Since this is a virtual cluster that we can shut down whenever we want, this isn&#39;t as dangerous as it would be with a regular computer.</p>
 
-<p>Sometimes your connection might be interrupted and you&#39;ll lose your work, so we&#39;ll run our work on the master node usnig the screen program:</p>
+<p>Sometimes your connection might be interrupted and you&#39;ll lose your work, so you may want to run your work on the master node using the UNIX <em>screen</em> program:</p>
 
 <pre><code class="bash">screen -x -RR
 </code></pre>
