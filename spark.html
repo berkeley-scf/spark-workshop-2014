@@ -466,7 +466,7 @@ lines.count()
 
 <h4>Reading into Spark from S3</h4>
 
-<p>If we wanted to read directly into Spark from S3 (again checking if we need s3 or s3n), we can do something like this, here reading from the berkeley-scf-test S3 bucket. </p>
+<p>If we wanted to read directly into Spark from S3 (again checking if we need s3 or s3n), we can do something like this, here reading the Google n-grams word co-occurrence dataset:</p>
 
 <pre><code class="python">lines = sc.textFile(&quot;s3n://&lt;AWS_ACCESS_KEY_ID&gt;:&lt;AWS_SECRET_ACCESS_KEY&gt;@datasets.elasticmapreduce/ngrams/books/20090715/eng-us-all/1gram&quot;)
 </code></pre>
