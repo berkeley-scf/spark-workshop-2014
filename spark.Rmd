@@ -314,7 +314,7 @@ You can use `flatMap()` if each row contains multiple observations.
 
 #### Reading into Spark from S3
 
-If we wanted to read directly into Spark from S3 (again checking if we need s3 or s3n), we can do something like this, here reading from the berkeley-scf-test S3 bucket. 
+If we wanted to read directly into Spark from S3 (again checking if we need s3 or s3n), we can do something like this, here reading the Google n-grams word co-occurrence dataset:
 
 ```{r, eval=FALSE}
 lines = sc.textFile("s3n://<AWS_ACCESS_KEY_ID>:<AWS_SECRET_ACCESS_KEY>@datasets.elasticmapreduce/ngrams/books/20090715/eng-us-all/1gram")
