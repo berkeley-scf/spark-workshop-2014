@@ -353,7 +353,7 @@ tar -xvzf 1987-2008.csvs.tgz
 <p>Once you have files on the master you can set up directories in the HDFS as desired and copy the dataset onto the HDFS as follows. Often your dataset will be a collection of (possibly zipped) plain text files, such as CSVs. You don&#39;t need to unzip the files - Spark can read data from zipped files.</p>
 
 <pre><code class="bash">export PATH=$PATH:/root/ephemeral-hdfs/bin/
-hadoop fs -mkdir /data
+# /data will be created automatically because hdfs mkdir assumes -p option.
 hadoop fs -mkdir /data/airline
 hadoop fs -copyFromLocal /mnt/airline/*bz2 /data/airline
 hadoop fs -ls /data/airline
