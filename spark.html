@@ -353,7 +353,6 @@ tar -xvzf 1987-2008.csvs.tgz
 <p>Once you have files on the master you can set up directories in the HDFS as desired and copy the dataset onto the HDFS as follows. Often your dataset will be a collection of (possibly zipped) plain text files, such as CSVs. You don&#39;t need to unzip the files - Spark can read data from zipped files.</p>
 
 <pre><code class="bash">export PATH=$PATH:/root/ephemeral-hdfs/bin/
-hadoop fs -mkdir /data
 hadoop fs -mkdir /data/airline
 hadoop fs -copyFromLocal /mnt/airline/*bz2 /data/airline
 hadoop fs -ls /data/airline
@@ -609,6 +608,8 @@ twoKeyCounts = keyValues.reduceByKey(add).take(2)
 <h3>2.3.3) Partitions and repartitioning</h3>
 
 <p>The number of chunks your dataset is broken into can greatly impact computational efficiency. When a map function is applied to the RDD, the work is broken into one task per partition. </p>
+
+<p>You want each partition to be able to fit in the memory availalbe on a node, and if you have multi-core nodes, you want that as many partitions as there are cores be able to fit in memory.</p>
 
 <p>For load-balancing you&#39;ll want at least as many partitions as total computational cores in your cluster and probably rather more partitions. The Spark documentation suggests 2-4 partitions (which they also seem to call <em>slices</em>) per CPU. Often there are 100-10,000 partitions. Another rule of thumb is that tasks should take at least 100 ms. If less than that, you may want to repartition to have fewer partitions.</p>
 
