@@ -14,9 +14,12 @@ cd SparkR-pkg
 ./install-dev.sh
 /root/spark-ec2/copy-dir /root/SparkR-pkg
 
+# always start sparkR like this:
 cd /root/SparkR-pkg
 MASTER=`cat /root/spark-ec2/cluster-url` ./sparkR
 
+###########################################################################
+# IGNORE ANYTHING BELOW HERE
 ###########################################################################
 # this would work on a single node but doesn't install SparkR on the slaves
 yum install R
