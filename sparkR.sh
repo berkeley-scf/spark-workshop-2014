@@ -14,9 +14,20 @@ cd SparkR-pkg
 ./install-dev.sh
 /root/spark-ec2/copy-dir /root/SparkR-pkg
 
+# I'm not sure about this next bit - still playing around...
+# ensure that /tmp points to /mnt which has 400 Gb free
+# rather than being on / , which has ~ 5 Gb, since
+# SparkR uses /tmp (possibly via R's tempdir()?) to store on disk
+#/root/spark/sbin/slaves.sh rm -rf /tmp
+#/root/spark/sbin/slaves.sh mkdir /mnt/tmp
+#/root/spark/sbin/slaves.sh ln -s /mnt/tmp /tmp
+
+
 # always start sparkR like this:
 cd /root/SparkR-pkg
 MASTER=`cat /root/spark-ec2/cluster-url` ./sparkR
+# setting MASTER allows SparkR to run on the cluster
+
 
 ###########################################################################
 # IGNORE ANYTHING BELOW HERE
