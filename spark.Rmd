@@ -1097,7 +1097,7 @@ I ran into an installation issue when installing on the SCF and haven't had a ch
 
 *Spark Streaming* allows you to work with data arriving in an on-line manner. 
 
-*SparkR* provides an R interface. It's in available on [Github](http://amplab-extras.github.io/SparkR-pkg/). The Spark developers tell me it's not on the main Spark webpage as it's not part of Apache but that it has all the main features of PySpark and is under active development.
+*SparkR* provides an R interface. It's in available on [Github](http://amplab-extras.github.io/SparkR-pkg/). The Spark developers tell me it's not on the main Spark webpage as it's not part of Apache but that it has all the main features of PySpark and is under active development. There is a mailing list sparkr-dev@googlegroups.com and a JIRA, https://sparkr.atlassian.net/browse/SPARKR/. I have some shell code that will install SparkR on an AWS EC2 cluster (see sparkR.sh in this repository) and some demo code for using SparkR (see sparkR.R in this repository).
 
 ## 4.3) Alternatives to Spark
 
