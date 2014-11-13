@@ -1,10 +1,12 @@
-# if not on EC2 and using on single node:
-# master <- system("cat /root/spark-ec2/cluster-url", intern = TRUE)
+# if not on EC2 and using on single node, start R without the SparkR script and do
+# library(SparkR, lib.loc = '/path/to/R/library/containing/sparkR')
 # sc <- sparkR.init(master = 'local')
-# sc <- sparkR.init(master = 'local[2]')
-# sc <- sparkR.init(master = master)
+# sc <- sparkR.init(master = 'local[2]')  # to use 2 cores
 
-# library(SparkR)
+# if on EC2 and want to start R without the SparkR script:
+# library(SparkR, lib.loc = '/root/SparkR-pkg/lib')
+# master <- system("cat /root/spark-ec2/cluster-url", intern = TRUE)
+# sc <- sparkR.init(master = master, sparkEnvir=list(spark.executor.memory="6g",spark.local.dir='/mnt2'))
 
 # remember SparkR needs to have been started specifying MASTER to point to the Spark URI
 
