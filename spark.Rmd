@@ -679,7 +679,8 @@ from operator import add
 
 def screen(vals):
     vals = vals.split(',')
-    return(vals[0] != 'Year' and vals[14] != 'NA' and vals[18] != 'NA' and vals[3] != 'NA' and
+    return(vals[0] != 'Year' and vals[14] != 'NA' and vals[18] != 'NA' 
+           and vals[3] != 'NA' and
            float(vals[14]) < 720 and float(vals[14]) > (-30) )
 
 lines = sc.textFile('/data/airline').filter(screen).repartition(192).cache()
@@ -711,7 +712,7 @@ mles = np.linalg.solve(suffStats[0:P,0:P], suffStats[0:P,P])
 
 ### More efficient calculation using `mapPartitions()` 
 
-That calculation of the sufficient statistics applied the linear algebra row by row. For the full airline datast it took about 11 minutes. A more efficient alternative is to put all the data for a given partition into a matrix and do the linear algebra on the matrix. The code below takes about 2.5 minutes.
+That calculation of the sufficient statistics applied the linear algebra row by row. For the full airline dataset it took about 11 minutes. A more efficient alternative is to put all the data for a given partition into a matrix and do the linear algebra on the matrix. The code below takes about 2.5 minutes.
 
 Here we use `mapPartitions()` to apply a map to an entire partition - the `readPointBatch()` function iterates through the observations in the partition and constructs the $X$ matrix before then doing the crossproduct.
 
@@ -1007,6 +1008,9 @@ As above with coordinate descent, we'll use the batches RDD that has the data in
 
 ```
 # step size (somewhat arbitrary here)
+P=8
+bc = sc.broadcast(P)
+
 alpha = .4
 
 n = lines.count()
@@ -1020,7 +1024,6 @@ beta = np.array([0.0] * P)
 beta[0] = batches.map(sumVals).reduce(add) / n
 oldBeta = beta.copy()
 
-bc = sc.broadcast(P)
 bc = sc.broadcast(beta)
 
 def getGradBatch(mat):
