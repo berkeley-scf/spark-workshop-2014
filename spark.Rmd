@@ -89,12 +89,13 @@ CLUSTER_SIZE=12
 SPARK_VERSION=1.1.0
 WAIT_TIME=300
 REGION=us-west-2
-SSH_KEY=FILL_IN_NAME_OF_YOUR_SSH_KEY
+SSH_KEY_NAME=FILL_IN_NAME_OF_YOUR_SSH_KEY   # e.g., <your_aws_username>@berkeley.edu:spark-workshop-2014
+SSH_KEY_FILENAME=FILL_IN_NAME_OF_YOUR_SSH_KEY_FILENAME  # e.g., spark-workshop-2014-ssh_key.pem
 AWS_ACCESS_KEY_ID=FILL_IN_YOUR_ACCESS_KEY
 AWS_SECRET_ACCESS_KEY=FILL_IN_YOUR_SECRET_KEY
 YOUR_NAME=SOME_UNIQUE_NAME_FOR_YOUR_CLUSTER
 cd /usr/local/linux/spark/ec2
-./spark-ec2 -k ${SSH_KEY} -i ~/.ssh/${SSH_KEY}.rsa --region=${REGION} -s ${CLUSTER_SIZE} -w $WAIT_TIME -v ${SPARK_VERSION} launch sparkvm-${YOUR_NAME}
+./spark-ec2 -k ${SSH_KEY_NAME} -i ~/.ssh/${SSH_KEY_FILENAME} --region=${REGION} -s ${CLUSTER_SIZE} -w $WAIT_TIME -v ${SPARK_VERSION} launch sparkvm-${YOUR_NAME}
 ```
 
 You'll need to wait for a few minutes (in particular at least the number of seconds indicated above in the WAIT_TIME variable). Look carefully for error messages as sometimes the startup of the nodes and installation of the Spark software does not go smoothly. If all goes well, the end of the messages printed to the screen should look like this:
@@ -148,12 +149,12 @@ If you want to see some of the various options and actions possible with the spa
 
 First we'll login to the master node of our cluster.
 ```{r, engine='bash'}
-./spark-ec2 -k ${SSH_KEY} -i ~/.ssh/${SSH_KEY}.rsa --region=${REGION} login sparkvm-${YOUR_NAME}
+./spark-ec2 -k ${SSH_KEY_NAME} -i ~/.ssh/${SSH_KEY_FILENAME} --region=${REGION} login sparkvm-${YOUR_NAME}
 ```
 
 You could also login directly with ssh provided you notice the IP address of your master in the startup messages or on the AWS EC2 webpage for your AWS account:
 ```{r, eval=FALSE}
-ssh -i ~/.ssh/${SSH_KEY}.rsa root@ec2-54-71-181-49.us-west-2.compute.amazonaws.com
+ssh -i ~/.ssh/${SSH_KEY_FILENAME} root@ec2-54-71-181-49.us-west-2.compute.amazonaws.com
 ```
 
 Note that Spark expects you to be the root user so we'll do everything as root. Since this is a virtual cluster that we can shut down whenever we want, this isn't as dangerous as it would be with a regular computer.
@@ -178,7 +179,7 @@ Here are some options.
 
 #### Copying to the master node followed by copying to the HDFS
 
-You can use `scp` to copy files to the master node. The easiest thing is to be logged onto the master node and scp from your local machine to the master. But you can also use the IP address from `/root/ephemeral-hdfs/conf/masters` to scp from your local machine to the master, making sure to use the `-i ~/.ssh/${SSH_KEY}.rsa` flag to point to your private key. 
+You can use `scp` to copy files to the master node. The easiest thing is to be logged onto the master node and scp from your local machine to the master. But you can also use the IP address from `/root/ephemeral-hdfs/conf/masters` to scp from your local machine to the master, making sure to use the `-i ~/.ssh/${SSH_KEY_FILENAME}` flag to point to your private key. 
 
 We'll copy the ASA Data Expo Airline dataset:
 
