@@ -812,7 +812,8 @@ from operator import add
 
 def screen(vals):
     vals = vals.split(&#39;,&#39;)
-    return(vals[0] != &#39;Year&#39; and vals[14] != &#39;NA&#39; and vals[18] != &#39;NA&#39; and vals[3] != &#39;NA&#39; and
+    return(vals[0] != &#39;Year&#39; and vals[14] != &#39;NA&#39; and vals[18] != &#39;NA&#39; 
+           and vals[3] != &#39;NA&#39; and
            float(vals[14]) &lt; 720 and float(vals[14]) &gt; (-30) )
 
 lines = sc.textFile(&#39;/data/airline&#39;).filter(screen).repartition(192).cache()
@@ -843,7 +844,7 @@ mles = np.linalg.solve(suffStats[0:P,0:P], suffStats[0:P,P])
 
 <h3>More efficient calculation using <code>mapPartitions()</code></h3>
 
-<p>That calculation of the sufficient statistics applied the linear algebra row by row. For the full airline datast it took about 11 minutes. A more efficient alternative is to put all the data for a given partition into a matrix and do the linear algebra on the matrix. The code below takes about 2.5 minutes.</p>
+<p>That calculation of the sufficient statistics applied the linear algebra row by row. For the full airline dataset it took about 11 minutes. A more efficient alternative is to put all the data for a given partition into a matrix and do the linear algebra on the matrix. The code below takes about 2.5 minutes.</p>
 
 <p>Here we use <code>mapPartitions()</code> to apply a map to an entire partition - the <code>readPointBatch()</code> function iterates through the observations in the partition and constructs the \(X\) matrix before then doing the crossproduct.</p>
 
@@ -1130,6 +1131,9 @@ for it in range(0,nIts):
 <p>As above with coordinate descent, we&#39;ll use the batches RDD that has the data in one matrix per partition.</p>
 
 <pre><code># step size (somewhat arbitrary here)
+P=8
+bc = sc.broadcast(P)
+
 alpha = .4
 
 n = lines.count()
@@ -1143,7 +1147,6 @@ beta = np.array([0.0] * P)
 beta[0] = batches.map(sumVals).reduce(add) / n
 oldBeta = beta.copy()
 
-bc = sc.broadcast(P)
 bc = sc.broadcast(beta)
 
 def getGradBatch(mat):
