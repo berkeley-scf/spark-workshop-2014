@@ -7,7 +7,7 @@ Chris Paciorek, Statistical Computing Facility, Department of Statistics, UC Ber
 
 Presented: November 7 and 14, 2014
 
-Last Revised: November 7, 2014
+Last Revised: November 14, 2014
 
 ```{r setup, include=FALSE}
 opts_chunk$set(engine='python', eval=FALSE) # because we're using a lot of bash, let's set as default
