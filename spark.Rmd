@@ -564,7 +564,7 @@ len(dat[0][1])
 [val for val in dat[0][1]]
 ```
 
-Note that the median calculation is another map function not a reduce, because it's just a 1-1 transformation of the RDD that is returned by `groupByKey()`. But of course the size of the value for each key is much larger before the application of the `medianFun()` map step
+Note that the median calculation is another map function not a reduce, because it's just a 1-1 transformation of the RDD that is returned by `groupByKey()`. But of course the size of the value associated with each key is much larger before the application of the `medianFun()` map step.
 
 ### 2.4.3) Stratifying data and exporting
 
@@ -614,7 +614,7 @@ count = sc.parallelize(xrange(0, num_slices), num_slices).map(sample).reduce(add
 print "Pi is roughly %f" % (4.0 * count / (num_slices*samples_per_slice))
 ```
 
-Let's piece that apart. The `parallelize()` call basically takes the numbers {0,1,2,...,num_slices-1} and treats them as the input "dataset". These are the initial units and then the transformation (the mapper) is to do the random number generation and compute the partial sum. The second argument to `parallelize()` indicates how many partitions to create, so this will correspond to the number of tasks that will be carried out in a subsequent map step. Using `paralllelize()` to create an RDD from an existing Python list is another to create an RDD, in addition to reading data from an external storage system such as the HDFS.
+Let's piece that apart. The `parallelize()` call basically takes the numbers {0,1,2,...,num_slices-1} and treats them as the input "dataset". These are the initial units and then the transformation (the mapper) is to do the random number generation and compute the partial sum. The second argument to `parallelize()` indicates how many partitions to create, so this will correspond to the number of tasks that will be carried out in a subsequent map step. Using `paralllelize()` to create an RDD from an existing Python list is another way to create an RDD, in addition to reading data from an external storage system such as the HDFS.
 
 A few comments here. First we could have sampled a single random vector, thereby calling `parallelize()` across numslices*samples_per_slice, with one task per {x,y} pair. But it's much more computationally efficient to do a larger chunk of calculation in each process since there is overhead in running each process. But we want enough processes to make use of all the processors collectively in our Spark cluster and probably rather more than that in case some processors do the computation more slowly than others. Also, if the computation involved a large amount of memory we wouldn't want to exceed the physical RAM available to the processes that work simultaneously on a node. However, we also don't want too many tasks. For example, if we try to have as many as 50 million parallel tasks, Spark will hang. Somehow the overhead in creating that many tasks is too great, though I need to look further for a complete explanation.
 
@@ -648,12 +648,12 @@ if __name__ == "__main__":
         x, y = rand.random(samples_per_slice), rand.random(samples_per_slice)
         return sum(x*x + y*y < 1)
 
-    count = sc.parallelize(xrange(0, num_slices), num_slices).map(sample).reduce(lambda a, b: a + b)
+    count = sc.parallelize(xrange(0, num_slices), num_slices).map(sample).reduce(add)
     print "Pi is roughly %f" % (4.0 * count / (num_slices*samples_per_slice))
 
 ```
 
-Note that by starting Python via PySpark, the `sc` object is created and available to you, but for batch jobs we need to import *SparkContext* and instantiate the *sc* object ourselves.
+Note that by starting Python via PySpark, the *sc* object is created and available to you, but for batch jobs we need to import *SparkContext* and instantiate the *sc* object ourselves.
 
 And here's how we run it from the UNIX command line on the master node
 ```{r, eval=FALSE}
@@ -668,7 +668,7 @@ spark-submit piCalc.py 100000000 1000
 
 ## 3.1) Regression example with sufficient statistics
 
-Suppose we wanted to run a regression with very many observations, `n`, but relatively few predictors, `p`. For our purposes here, let's assume $p < 5000$ so that $X^\top X$ takes up at most about 200 Mb. In this case we can compute the sufficient statistics, $X^\top X$  and $X^\top Y$ using MapReduce and return them to the master for the final calculation.
+Suppose we wanted to run a regression with very many observations, $n$, but relatively few predictors, $p$. For our purposes here, let's assume $p < 5000$ so that $X^\top X$ takes up at most about 200 Mb. In this case we can compute the sufficient statistics, $X^\top X$  and $X^\top Y$ using MapReduce and return them to the master for the final calculation.
 
 The basic calculation we are doing is $\sum_{i=1}^n x_i x_i^\top$ and $\sum_{i=1}^n x_i y_i$.
 
@@ -753,7 +753,7 @@ Note that for efficiency we'll again use the `mapPartitions()` version of this a
 
 ```{r, eval=FALSE}
 P=8
-const3 = sc.broadcast(P)
+bc = sc.broadcast(P)
 
 def readPointBatch(iterator):
     strs = list(iterator)
@@ -784,10 +784,6 @@ def getNumBatch(mat):
     beta[p] = 0
     sumXb = mat[:, 0:P].dot(beta)
     return(sum((mat[:,P] - sumXb)*mat[:,p]))
-
-def vecAdd(val1, val2):
-    return[val1[i]+val2[i] for i in xrange(P+1)]
-# this is faster than numpy vec add or looping to add val2[i] to val1[i]
 
 # compute denominator of update 
 sumx2 = batches.map(denomSumSqBatch).reduce(add)
@@ -920,7 +916,7 @@ Now we'll implement the basic *naive algorithm* from the Friedman et al. paper.
 
 ```{r, eval=FALSE}
 eps = 0.01
-alpha = 1 - eps  # lasso penalty
+alpha = 1 - eps  # alpha = 1 is lasso penalty, but with a slight numerical modification
 lamb = 0.5   # value of penalty parameter
 
 def Sfun(z, gamma):
@@ -1002,7 +998,7 @@ As noted, I implemented the *naive algorithm*. The *covariance updating algorith
 
 ## 3.4) Linear regression via gradient descent
 
-The coordinate descent algorithm for linear regression would be slow when there are many predictors as we are doing iterations in Spark over the coordinates. It would be faster to update all the coefficients at once and have the "iteration" be done within Python in the computation of the gradient (i.e., have the for loop across predictors calculate the gradient vector in Python within a partition). 
+The coordinate descent algorithm for linear regression would be slow when there are many predictors as we are doing iterations in Spark over the coordinates. It would be faster to update all the coefficients at once and have the "iteration" over the coefficients be done within Python in the computation of the gradient (i.e., have the for loop across predictors calculate the gradient vector in Python within a partition). 
 
 Here's gradient descent in Spark. Note that as is general for descent methods, we could step too far and the objective function might increase, particularly when we are not using the second derivatives to guide our step sizes. I haven't put in any checking here to ensure that our steps always go downhill, but I do provide a function to evaluate the objective function -- this could be used to make the algorithm more sophisticated.
 
@@ -1073,11 +1069,9 @@ It takes a while in terms of number of iterations, but when I ran it for another
 
 ## 3.5) Stochastic gradient descent and MLlib
 
-`MLlib` is the machine learning library for Spark, which implements a number of standard statistical/machine learning models/methods. We won't go into it here, but since the goal of MLlib is to provide ready-to-go functions to apply to datasets, it won't be hard for you to try it out given all of what we've seen here.
+[MLlib](http://spark.apache.org/docs/latest/mllib-guide.html) is the machine learning library for Spark, which implements a number of standard statistical/machine learning models/methods. We won't go into it here, but since the goal of MLlib is to provide ready-to-go functions to apply to datasets, it won't be hard for you to try it out given all of what we've seen here.
 
 One standard method in fitting large datasets is stochastic gradient descent, which involves choosing a random subset of the observations to use to compute the gradient at each update. MLlib relies heavily on SGD and the Spark documentation provides details.
-
-[maybe show the SGD lin regr example]
 
 ## 3.6 Uncertainty
 
@@ -1087,9 +1081,9 @@ I'd have my Statistics PhD revoked if I didn't say anything about uncertainty es
 
 ## 4.1) Running Spark serially on your own machine
 
-One should be able to test Spark readily on your own machine with the workers all operating on your single machine rather than on the nodes of a cluster. So far, based on the instructions above, you have simply unzipped the Spark tarball and not actually installed the software. To install the software, try downloading the pre-built binary at the [Spark downloads page](http://spark.apache.org/downloads.html). You might try the Hadoop 1.X version. 
+One should be able to test Spark readily on your own machine with the workers all operating on your single machine rather than on the nodes of a cluster. So far, based on the instructions above, you have simply unzipped the Spark tarball and not actually installed the software. To install the software, try downloading the pre-built binary at the [Spark downloads page](http://spark.apache.org/downloads.html).  This will allow you to use Spark for simulation but if you want to make use of HDFS, you'd need to install Hadoop on your system.
 
-I ran into an installation issue when installing on the SCF and haven't had a chance to get back to fix it, but if ayone wants to be able to run it on a single machine on the SCF or EML, email consult@stat.berkeley.edu or consult@econ.berkeley.edu.
+I ran into an installation issue when installing on the SCF and haven't had a chance to get back to fix it nor to think about installin Hadoop, but if anyone wants to be able to run it on a single machine on the SCF or EML, email consult@stat.berkeley.edu or consult@econ.berkeley.edu.
 
 ## 4.2) Additional features of Spark
 
@@ -1097,7 +1091,7 @@ I ran into an installation issue when installing on the SCF and haven't had a ch
 
 *Spark Streaming* allows you to work with data arriving in an on-line manner. 
 
-*SparkR* provides an R interface. It's in available on [Github](http://amplab-extras.github.io/SparkR-pkg/). The Spark developers tell me it's not on the main Spark webpage as it's not part of Apache but that it has all the main features of PySpark and is under active development. There is a mailing list sparkr-dev@googlegroups.com and a JIRA, https://sparkr.atlassian.net/browse/SPARKR/. I have some shell code that will install SparkR on an AWS EC2 cluster (see sparkR.sh in this repository) and some demo code for using SparkR (see sparkR.R in this repository).
+*SparkR* provides an R interface. It's in available on [Github](http://amplab-extras.github.io/SparkR-pkg/). The Spark developers tell me it's not on the main Spark webpage as it's not part of Apache but that it has all the main features of PySpark and is under active development. There is a mailing list sparkr-dev@googlegroups.com and a JIRA, https://sparkr.atlassian.net/browse/SPARKR/. I have some shell code that will install SparkR on an AWS EC2 cluster (see sparkR.sh in this repository) and some demo code for using SparkR (see sparkR.R in this repository).  However the code is still under construction and I've run into some issues that I've been talking with the SparkR developers about, so the working code in sparkR.sh is limited.
 
 ## 4.3) Alternatives to Spark
 

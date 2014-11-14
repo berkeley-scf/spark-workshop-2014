@@ -1,14 +1,13 @@
+if(!exists('sc')) { # not started via sparkR script
 # if not on EC2 and using on single node, start R without the SparkR script and do
 # library(SparkR, lib.loc = '/path/to/R/library/containing/sparkR')
 # sc <- sparkR.init(master = 'local')
 # sc <- sparkR.init(master = 'local[2]')  # to use 2 cores
-
 # if on EC2 and want to start R without the SparkR script:
-# library(SparkR, lib.loc = '/root/SparkR-pkg/lib')
-# master <- system("cat /root/spark-ec2/cluster-url", intern = TRUE)
-# sc <- sparkR.init(master = master, sparkEnvir=list(spark.executor.memory="6g",spark.local.dir='/mnt2'))
-
-# remember SparkR needs to have been started specifying MASTER to point to the Spark URI
+  library(SparkR, lib.loc = '/root/SparkR-pkg/lib')
+  master <- system("cat /root/spark-ec2/cluster-url", intern = TRUE)
+  sc <- sparkR.init(master = master, sparkEnvir=list(spark.executor.memory="6g",spark.local.dir='/mnt2'))
+} # if using sparkR script to start,  remember SparkR needs to have been started specifying MASTER to point to the Spark URI
 
 library(help = SparkR) # this will show the SparkR functions available and then you can get the R help info for individual functions as usual in R
 
@@ -17,8 +16,8 @@ library(help = SparkR) # this will show the SparkR functions available and then 
 # reading airline data in
 ##############################
 
-master <- system("cat /root/ephemeral-hdfs/conf/masters", intern = TRUE)
-lines <- textFile(sc, paste0("hdfs://", master, ":9000/data/airline"))
+hdfs_master <- system("cat /root/ephemeral-hdfs/conf/masters", intern = TRUE)
+lines <- textFile(sc, paste0("hdfs://", hdfs_master, ":9000/data/airline"))
 
 count(lines)
 
