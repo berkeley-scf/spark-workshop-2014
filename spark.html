@@ -1208,11 +1208,13 @@ for it in range(1,nIts):
 
 <h2>4.1) Running Spark serially on your own machine</h2>
 
-<p>One should be able to test Spark readily on your own machine with the workers all operating on your single machine rather than on the nodes of a cluster. So far, based on the instructions above, you have simply unzipped the Spark tarball and not actually installed the software. To install the software, try downloading the pre-built binary at the <a href="http://spark.apache.org/downloads.html">Spark downloads page</a>.  This will allow you to use Spark for simulation but if you want to make use of HDFS, you&#39;d need to install Hadoop on your system.</p>
+<p>One should be able to test Spark readily on your own machine with the workers all operating on your single machine rather than on the nodes of a cluster. So far, based on the instructions above, you have simply unzipped the Spark tarball and not actually installed the software. To install the software, try downloading the pre-built binary at the <a href="http://spark.apache.org/downloads.html">Spark downloads page</a>.  This will allow you to use Spark for simulation. To access data on disk, you&#39;ll want to read data from the local disk, rather than HDFS, into Spark. (Otherwise, you&#39;d need to have Hadoop installed with the HDFS set up and with only a single node there&#39;s no obvious purpose to this.) So in your <code>textFile()</code> invocation, just refer to the local path on the machine, e.g., <code>sc.textFile(&quot;/path/to/data.txt&quot;)</code>.</p>
 
 <p>I ran into an installation issue when installing on the SCF and haven&#39;t had a chance to get back to fix it nor to think about installin Hadoop, but if anyone wants to be able to run it on a single machine on the SCF or EML, email <a href="mailto:consult@stat.berkeley.edu">consult@stat.berkeley.edu</a> or <a href="mailto:consult@econ.berkeley.edu">consult@econ.berkeley.edu</a>.</p>
 
 <h2>4.2) Additional features of Spark</h2>
+
+<p>To use Spark with iPython, see <a href="http://blog.cloudera.com/blog/2014/08/how-to-use-ipython-notebook-with-apache-spark/">this post</a>.</p>
 
 <p><em>Spark SQL</em> allows you to do SQL queries on RDDs. </p>
 
