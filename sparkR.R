@@ -6,7 +6,7 @@ if(!exists('sc')) { # not started via sparkR script
 # if on EC2 and want to start R without the SparkR script:
   library(SparkR, lib.loc = '/root/SparkR-pkg/lib')
   master <- system("cat /root/spark-ec2/cluster-url", intern = TRUE)
-  sc <- sparkR.init(master = master, sparkEnvir=list(spark.executor.memory="6g",spark.local.dir='/mnt2'))
+  sc <- sparkR.init(master = master, sparkEnvir=list(spark.executor.memory="6g"))
 } # if using sparkR script to start,  remember SparkR needs to have been started specifying MASTER to point to the Spark URI
 
 library(help = SparkR) # this will show the SparkR functions available and then you can get the R help info for individual functions as usual in R
@@ -22,11 +22,6 @@ lines <- textFile(sc, paste0("hdfs://", hdfs_master, ":9000/data/airline"))
 count(lines)
 
 take(lines, 1)
-# that gives Java error:
-#14/11/13 02:32:01 WARN TaskSetManager: Lost task 0.2 in stage 5.0 (TID 52, ip-10-225-185-25.us-west-2.compute.internal): java.lang.OutOfMemoryError: Java heap space
-# ....
-#14/11/13 02:32:02 ERROR TaskSchedulerImpl: Lost executor 7 on ip-10-225-185-25.us-west-2.compute.internal: remote Akka client disassociated
-
 
 # no partition() in SparkR yet; here's a workaround (UNDER CONSTRUCTION)
 
@@ -42,7 +37,8 @@ createKeyValue <- function(line) {
 
 linesWithKey <- map(lines, createKeyValue)
 count(linesWithKey)
-# linesPartitioned <- partitionBy(linesWithKey, numPartitions = 192)
+# method doesn't work on this...
+linesPartitioned <- partitionBy(linesWithKey, numPartitions = 192)
 
 #myRdd <- map(myTextFileRdd, function(x) { list(x, x) })
 #partitioned <- partitionBy(myRdd, numPartitions = 10L)

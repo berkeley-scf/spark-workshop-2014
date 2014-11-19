@@ -4,9 +4,8 @@ cd /root
 wget http://cran.cnr.berkeley.edu/src/contrib/rJava_0.9-6.tar.gz
 /root/spark-ec2/copy-dir rJava_0.9-6.tar.gz
 R CMD javareconf
-tar xvzf rJava_0.9-6.tar.gz && R CMD INSTALL rJava
-/root/spark/sbin/slaves.sh R CMD javareconf
-/root/spark/sbin/slaves.sh R CMD INSTALL ~/rJava_0.9-6.tar.gz
+tar xvzf rJava_0.9-6.tar.gz; R CMD INSTALL rJava
+/root/spark/sbin/slaves.sh R CMD javareconf; R CMD INSTALL ~/rJava_0.9-6.tar.gz
 
 cd /root
 git clone https://github.com/amplab-extras/SparkR-pkg.git
@@ -16,10 +15,9 @@ cd SparkR-pkg
 
 # always start sparkR like this:
 cd /root/SparkR-pkg
-MASTER=`cat /root/spark-ec2/cluster-url` SPARK_MEM=6g SPARK_LOCAL_DIRS=/mnt2 ./sparkR
+MASTER=`cat /root/spark-ec2/cluster-url` SPARK_MEM=6g ./sparkR
 # setting MASTER allows SparkR to run on the cluster
 # setting SPARK_MEM allows slaves to use more of the physical memory
-# setting SPARK_LOCAL_DIRS puts temporary files in /mnt2, which has lots of space and not /tmp, which has limited space
 
 
 ###########################################################################
