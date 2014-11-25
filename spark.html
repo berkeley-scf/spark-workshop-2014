@@ -174,7 +174,7 @@ hr {
 
 <p>Presented: November 7 and 14, 2014</p>
 
-<p>Last Revised: November 14, 2014</p>
+<p>Last Revised: November 24, 2014</p>
 
 <h1>0) This Tutorial</h1>
 
@@ -411,7 +411,7 @@ lines.count()
 
 <p>The <code>textFile()</code> method reads the data from the airline directory, dealing with the compression and with the various files that data is split into. </p>
 
-<p>Note that the first line seems to take no time at all. That is because Spark uses <strong>lazy evaluation</strong>, delaying evaluation of code until it needs to actually produce a result. So sometimes it can be hard to figure out how long each piece of a calculation takes because multiple pieces are being combined together. I&#39;ll sometimes do a <code>count()</code> just to force the evaluation of the previous command.</p>
+<p>Note that the first line seems to take no time at all. That is because Spark uses <strong>lazy evaluation</strong>, delaying evaluation of code until it needs to actually produce a result. So sometimes it can be hard to figure out how long each piece of a calculation takes because multiple pieces are being combined together. I&#39;ll sometimes do a <code>count()</code> just to force the evaluation of the previous command.  Transformations such as <code>map()</code> and <code>reduce()</code> do not trigger evaluation but actions such as <code>count()</code>, <code>collect()</code>, and <code>saveAsTextFile()</code> do.  Note also that serialization between Java and Python objects only occurs at barriers defined by actions, so if you have a series of transformations, you shouldn&#39;t incur repeated serialization.</p>
 
 <p>You should see a bunch of logging messages that look like this:</p>
 
@@ -628,7 +628,7 @@ twoKeyCounts = keyValues.reduceByKey(add).take(2)
 
 <p>We&#39;ll see a variety of MapReduce algorithms here so this should become more concrete. </p>
 
-<p>In addition to map and reduce steps, we can pass shared data to all the nodes via a broadcast step. This will often be important in iterative calculations. E.g., we might broadcast the current parameter values in an iterative optimization computation. </p>
+<p>In addition to map and reduce steps, we can explicitly pass shared data to all the nodes via a broadcast step. Broadcast variables allow the programmer to keep a read-only variable cached on each machine rather than shipping a copy of it with tasks. They can be used, for example, to give every node a copy of a large input dataset in an efficient manner. </p>
 
 <h2>2.4) Additional data processing in Spark</h2>
 
@@ -720,12 +720,9 @@ keyedLines = lines.map(createKeyValue).cache()
 keys = keyedLines.countByKey().keys()
 
 for curkey in keys:
-    const = sc.broadcast(curkey)
     fn = &#39;/data/&#39; + curkey
     keyedLines.filter(lambda x: curkey == x[0]).map(lambda x: x[1]).repartition(1).saveAsTextFile(fn)
 </code></pre>
-
-<p>Note the use of the <code>broadcast()</code> method to send out the value of a variable to all the workers.</p>
 
 <p>The <code>repartition(1)</code> ensures that the entire RDD for a given key is on a single partition so that we get a single file for each stratum instead of having each stratum split into pieces across the different nodes hosting the HDFS. The mapper simply pulls out the value for each key-value pair, discarding the key. </p>
 
@@ -821,7 +818,6 @@ lines = sc.textFile(&#39;/data/airline&#39;).filter(screen).repartition(192).cac
 P = 8
 
 def crossprod(line):
-    P = 8
     vals = line.split(&#39;,&#39;)
     y = float(vals[14])
     dist = float(vals[18])
@@ -852,7 +848,6 @@ mles = np.linalg.solve(suffStats[0:P,0:P], suffStats[0:P,P])
 
 <pre><code class="python">def readPointBatch(iterator):
     strs = list(iterator)
-    P = 8
     matrix = np.zeros((len(strs), P+1))
     for i in xrange(len(strs)):
         vals = strs[i].split(&#39;,&#39;)
@@ -884,7 +879,6 @@ mles = np.linalg.solve(suffStats2[0:P,0:P], suffStats2[0:P,P])
 <p>Note that for efficiency we&#39;ll again use the <code>mapPartitions()</code> version of this algorithm.</p>
 
 <pre><code class="python">P=8
-bc = sc.broadcast(P)
 
 def readPointBatch(iterator):
     strs = list(iterator)
@@ -931,8 +925,6 @@ it = 0
 for it in range(1,100):
     for p in xrange(P):
         # distribute current beta and current coordinate
-        bc1 = sc.broadcast(beta)
-        bc2 = sc.broadcast(p)
         sumNum = batches.map(getNumBatch).reduce(add)
         # update coordinate:
         beta[p] = sumNum / sumx2[p]   
@@ -975,17 +967,11 @@ nNonZero = 10
 betaTrue = [-2, -1.5, -1.0, -0.5, -0.3, -0.1, 0.3, 0.5, 1.0, 1.5]
 betaTrue = np.append(betaTrue, np.zeros(P-nNonZero))
 
-const1 = sc.broadcast(P)
-const2 = sc.broadcast(betaTrue)
-const3 = sc.broadcast(n)
-
 # create dataset as RDD
 
 # allow generation of autocorrelated X&#39;s to make optimiz&#39;n harder
 autocorr = 1
 rho = 0.7
-const1 = sc.broadcast(autocorr)
-const2 = sc.broadcast(rho)
 
 def simData(it):
     np.random.seed(it)
@@ -1017,8 +1003,6 @@ batchesLasso = data.mapPartitions(readPointBatch)
     return mat.sum(axis = 0)
 
 colMeans = (batchesLasso.map(getSums).reduce(add) / n)[0:P]
-
-const = sc.broadcast(colMeans)
 
 def stdizeMean(mat):
     mat[:, 0:P] = mat[:, 0:P] - colMeans
@@ -1074,10 +1058,6 @@ storeVals = np.zeros((nIts, P+1))
 
 for it in range(0,nIts):
     for p in xrange(P):
-        # distribute current beta and current coordinate
-        const1 = sc.broadcast(beta)
-        const2 = sc.broadcast(p)
-        const3 = sc.broadcast(nonZeros)
         # get numerator as product of residual and X for coordinate
         sumNum = batchesLasso.map(getNumBatch).reduce(add)
         beta[p] = Sfun(sumNum/n + beta[p], lamb*alpha) / (1 + lamb*eps)
@@ -1132,7 +1112,6 @@ for it in range(0,nIts):
 
 <pre><code># step size (somewhat arbitrary here)
 P=8
-bc = sc.broadcast(P)
 
 alpha = .4
 
@@ -1146,8 +1125,6 @@ beta = np.array([0.0] * P)
 # initialize the intercept at empirical mean
 beta[0] = batches.map(sumVals).reduce(add) / n
 oldBeta = beta.copy()
-
-bc = sc.broadcast(beta)
 
 def getGradBatch(mat):
 # gradient function
@@ -1170,7 +1147,6 @@ for it in range(1,nIts):
     # update coefficients via simple gradient descent
     beta = beta - alpha * gradVec / n
     crit = sum(abs(beta - oldBeta))
-    bc = sc.broadcast(beta)
     objValue = batches.map(obj).reduce(add)
     oldBeta = beta.copy()
     storeVals[it, 0] = pow(objValue/n,0.5)
@@ -1212,7 +1188,11 @@ for it in range(1,nIts):
 
 <p>I ran into an installation issue when installing on the SCF and haven&#39;t had a chance to get back to fix it nor to think about installin Hadoop, but if anyone wants to be able to run it on a single machine on the SCF or EML, email <a href="mailto:consult@stat.berkeley.edu">consult@stat.berkeley.edu</a> or <a href="mailto:consult@econ.berkeley.edu">consult@econ.berkeley.edu</a>.</p>
 
-<h2>4.2) Additional features of Spark</h2>
+<h2>4.2) Using a fast BLAS</h2>
+
+<p>As is generally the case when using Python or R, if you&#39;re doing a lot of linear algebra, the speed of your code may be driven by the speed of the BLAS that Python or R is linked to. So if your Spark code does a lot of linear algebra, you probably want to link Python to a fast BLAS such as openBLAS.  For more information, email <a href="mailto:consult@stat.berkeley.edu">consult@stat.berkeley.edu</a> or <a href="mailto:consult@econ.berkeley.edu">consult@econ.berkeley.edu</a>.</p>
+
+<h2>4.3) Additional features of Spark</h2>
 
 <p>To use Spark with iPython, see <a href="http://blog.cloudera.com/blog/2014/08/how-to-use-ipython-notebook-with-apache-spark/">this post</a>.</p>
 
@@ -1222,7 +1202,7 @@ for it in range(1,nIts):
 
 <p><em>SparkR</em> provides an R interface. It&#39;s in available on <a href="http://amplab-extras.github.io/SparkR-pkg/">Github</a>. The Spark developers tell me it&#39;s not on the main Spark webpage as it&#39;s not part of Apache but that it has all the main features of PySpark and is under active development. There is a mailing list <a href="mailto:sparkr-dev@googlegroups.com">sparkr-dev@googlegroups.com</a> and a JIRA, <a href="https://sparkr.atlassian.net/browse/SPARKR/">https://sparkr.atlassian.net/browse/SPARKR/</a>. I have some shell code that will install SparkR on an AWS EC2 cluster (see sparkR.sh in this repository) and some demo code for using SparkR (see sparkR.R in this repository).  However the code is still under construction and I&#39;ve run into some issues that I&#39;ve been talking with the SparkR developers about, so the working code in sparkR.sh is limited.</p>
 
-<h2>4.3) Alternatives to Spark</h2>
+<h2>4.4) Alternatives to Spark</h2>
 
 <p>Many &ldquo;big data&rdquo; problems will fit on disk (and sometimes even in memory on machines with a lot of memory) on a single machine. If so, you may be better off doing the work on a single machine, potentially parallelizing calculations across multiple cores on that machine. Here are some of the tools that are useful for dealing with large datasets.</p>
 
@@ -1249,7 +1229,7 @@ https://docs.python.org/2/library/mmap.html
 <li><p>up-coming updates to LAPACK, ScaLAPACK for linear algebra on distributed memory clusters and on GPUs</p></li>
 </ul>
 
-<h2>4.4) More resources</h2>
+<h2>4.5) More resources</h2>
 
 <ul>
 <li>Most of this workshop is based on the <a href="http://spark.apache.org/docs/latest/programming-guide.html">Spark programming guide</a>.</li>
