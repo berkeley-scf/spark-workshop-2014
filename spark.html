@@ -184,12 +184,12 @@ hr {
 
 <p>Materials for this tutorial, including the R markdown file that was used to create this document are available on github at <code>https://github.com/berkeley-scf/spark-workshop-2014</code>.  You can download the files by doing a git clone:</p>
 
-<pre><code class="clone, eval=FALSE">git clone https://github.com/berkeley-scf/spark-workshop-2014
+<pre><code class="clone">git clone https://github.com/berkeley-scf/spark-workshop-2014
 </code></pre>
 
 <p>To create this HTML document, simply compile the corresponding R Markdown file in R:</p>
 
-<pre><code class="bash">Rscript -e &quot;library(knitr); knit2html(&#39;spark.Rmd&#39;)&quot;
+<pre><code class="rmd">Rscript -e &quot;library(knitr); knit2html(&#39;spark.Rmd&#39;)&quot;
 </code></pre>
 
 <!--
@@ -264,7 +264,7 @@ cd /usr/local/linux/spark/ec2
 Searching for existing cluster sparkvm-${YOUR_NAME}...
 Spark AMI: ami-9a6e0daa
 Launching instances...
-Launched 3 slaves in us-west-2a, regid = r-af7e0ca4
+Launched 12 slaves in us-west-2a, regid = r-af7e0ca4
 Launched master in us-west-2a, regid = r-ac7e0ca7
 Waiting for instances to start up...
 Waiting 300 more seconds...
@@ -872,7 +872,7 @@ mles = np.linalg.solve(suffStats2[0:P,0:P], suffStats2[0:P,P])
 
 <p>The strategy above makes a lot of sense but breaks down as \(P\) gets large. We might consider coordinate descent, iterating through the individual regression coefficients. Of course this would probably be quite slow for large \(P\), but it&#39;s worthwhile to illustrate and sets the stage for our use of coordinate descent for lasso problems in the next section.</p>
 
-<p>For linear regression, the optimization for a single coefficient, holding the others constant, can be done in closed form: \(\hat{\beta}_{k} = \frac{\sum_{i=1}^n r_i y_i} {\sum_{i=1}^n x_{k,i}^2 }\) where \(r_i = y_i - \sum_{j \ne k} x_{j,i}\beta_j\).</p>
+<p>For linear regression, the optimization for a single coefficient, holding the others constant, can be done in closed form: \(\hat{\beta}_{k} = \frac{\sum_{i=1}^n r_i x_{k,i}} {\sum_{i=1}^n x_{k,i}^2 }\) where \(r_i = y_i - \sum_{j \ne k} x_{j,i}\beta_j\).</p>
 
 <p>We&#39;ll precompute the denominator values in a MapReduce step. Our coordinate descent is then an iterative procedure with an inner loop that loops over the coefficients. For simplicity below I just do a fixed number of iterations, but in reality of course we would want a reasonable stopping criterion for the optimization.</p>
 
